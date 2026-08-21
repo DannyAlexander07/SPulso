@@ -58,6 +58,8 @@ aceptacion operativa indicados al final.
 - Se corrigio la URL interna del API usada por el proxy web dentro de Docker.
 - Se consolido API y web en un unico repositorio Git en la raiz. Los metadatos
   Git anidados se conservaron fuera del proyecto como respaldo recuperable.
+- El repositorio se publico en GitHub y el workflow CI de API y web termino
+  correctamente sobre el commit de correccion `5c98615`.
 
 ## Evidencia de verificacion
 
@@ -73,23 +75,22 @@ aceptacion operativa indicados al final.
 - Lint y build de API y web: aprobados.
 - Auditoria de dependencias de produccion: 0 vulnerabilidades en raiz, API y web.
 - Healthcheck del API y carga HTTP de la web en contenedores: HTTP 200.
+- GitHub Actions CI #2: trabajos API y web aprobados en un checkout limpio.
 
 ## Bloqueos antes de produccion
 
-1. Confirmar que el workflow de CI publicado en GitHub termina correctamente en
-   `main` antes de promover el mismo commit a la VPS.
-2. Crear secretos reales y rotables, dominios, TLS, firewall y proxy inverso;
+1. Crear secretos reales y rotables, dominios, TLS, firewall y proxy inverso;
    validar `TRUST_PROXY_HOPS` contra la topologia real.
-3. Configurar backups de PostgreSQL y archivos y demostrar una restauracion.
-4. Configurar el proveedor real de correo y antivirus/escaneo de documentos. El
+2. Configurar backups de PostgreSQL y archivos y demostrar una restauracion.
+3. Configurar el proveedor real de correo y antivirus/escaneo de documentos. El
    codigo no puede sustituir esas integraciones externas.
-5. Definir si recuperacion de contrasena, MFA y rotacion/refresh de sesion son
+4. Definir si recuperacion de contrasena, MFA y rotacion/refresh de sesion son
    requisitos obligatorios del lanzamiento.
-6. Validar legalmente la firma/aceptacion documental y definir comentarios de
+5. Validar legalmente la firma/aceptacion documental y definir comentarios de
    aprobacion/rechazo si el proceso los exige.
-7. Cargar coordenadas y radios reales de geocercas; la funcion debe permanecer
+6. Cargar coordenadas y radios reales de geocercas; la funcion debe permanecer
    deshabilitada donde esos datos no esten aprobados.
-8. Ejecutar staging en la VPS con datos anonimizados y luego UAT con usuarios de
+7. Ejecutar staging en la VPS con datos anonimizados y luego UAT con usuarios de
    cada rol antes de abrir produccion o enviarlo a campo.
 
 ## Estado de los datos de prueba
