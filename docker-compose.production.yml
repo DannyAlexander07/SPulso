@@ -1,0 +1,98 @@
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-spulso}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_USER: ${POSTGRES_USER:-spulso}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-spulso} -d ${POSTGRES_DB:-spulso}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - ${SPULSO_ENV_FILE:-.env.production}
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      EXPORT_JOBS_API_WORKER: "false"
+      TZ: America/Lima
+      TRUST_PROXY_HOPS: 1
+      PORT: 3001
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "node -e \"fetch('http://127.0.0.1:3001/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\"",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    ports:
+      - "127.0.0.1:3001:3001"
+    volumes:
+      - api-uploads:/app/apps/api/uploads
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    env_file:
+      - ${SPULSO_ENV_FILE:-.env.production}
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      EXPORT_JOBS_API_WORKER: "false"
+      TZ: America/Lima
+    command: ["npm", "run", "worker:exports"]
+    volumes:
+      - api-uploads:/app/apps/api/uploads
+
+  observability-check:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    profiles:
+      - monitoring
+    depends_on:
+      api:
+        condition: service_healthy
+    env_file:
+      - ${SPULSO_ENV_FILE:-.env.production}
+    environment:
+      OBSERVABILITY_METRICS_URL: http://api:3001/health/metrics
+    command: ["npm", "run", "observability:check"]
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      API_INTERNAL_URL: http://api:3001
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+      PORT: 3000
+      TZ: America/Lima
+    ports:
+      - "127.0.0.1:3000:3000"
+
+volumes:
+  api-uploads:
+  postgres-data:

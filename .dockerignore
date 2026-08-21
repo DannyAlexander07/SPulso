@@ -1,0 +1,12 @@
+**/node_modules
+**/.next
+**/dist
+**/coverage
+**/test-results
+**/playwright-report
+**/*.log
+apps/api/uploads
+qa-screenshots
+.git
+.env
+.env.production

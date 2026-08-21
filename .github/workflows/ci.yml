@@ -1,0 +1,172 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api:
+    name: API
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: spulso_ci
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+        options: >-
+          --health-cmd "pg_isready -U postgres -d spulso_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    env:
+      API_RATE_LIMIT: 600
+      AUTH_RATE_LIMIT: 12
+      CORS_ORIGINS: http://localhost:3000
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/spulso_ci?schema=public
+      EXPORT_JOBS_API_WORKER: "false"
+      FILE_STORAGE_DRIVER: local
+      FILE_STORAGE_LOCAL_ROOT: uploads
+      FORM_BODY_LIMIT: 64kb
+      JSON_BODY_LIMIT: 256kb
+      JWT_SECRET: spulso-ci-secret-change-in-deployments
+      PORT: 3001
+      TZ: America/Lima
+      TRUST_PROXY_HOPS: 0
+      WEB_URL: http://localhost:3000
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.17.0
+          cache: npm
+          cache-dependency-path: apps/api/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --prefix apps/api --workspaces=false
+
+      - name: Run migrations
+        run: npm --prefix apps/api run db:migrate:deploy
+
+      - name: Lint API
+        run: npm --prefix apps/api run lint
+
+      - name: Build API
+        run: npm --prefix apps/api run build
+
+      - name: Test API e2e
+        run: npm --prefix apps/api run test:e2e
+
+      - name: Seed isolated load-test data
+        env:
+          NODE_ENV: test
+        run: npm --prefix apps/api run seed
+
+      - name: Test export load smoke
+        run: npm --prefix apps/api run test:load:exports
+
+      - name: Audit API
+        run: npm audit --prefix apps/api --workspaces=false
+
+  web:
+    name: Web
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: spulso_ci
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+        options: >-
+          --health-cmd "pg_isready -U postgres -d spulso_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    env:
+      API_RATE_LIMIT: 600
+      AUTH_RATE_LIMIT: 12
+      CORS_ORIGINS: http://localhost:3000
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/spulso_ci?schema=public
+      EXPORT_JOBS_API_WORKER: "true"
+      FILE_STORAGE_DRIVER: local
+      FILE_STORAGE_LOCAL_ROOT: uploads
+      FORM_BODY_LIMIT: 64kb
+      JSON_BODY_LIMIT: 256kb
+      JWT_SECRET: spulso-ci-secret-change-in-deployments
+      NEXT_PUBLIC_API_URL: http://localhost:3001
+      TZ: America/Lima
+      TRUST_PROXY_HOPS: 0
+      WEB_URL: http://localhost:3000
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.17.0
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --prefix apps/web --workspaces=false
+
+      - name: Install API dependencies for web server
+        run: npm ci --prefix apps/api --workspaces=false
+
+      - name: Install Playwright Chromium
+        run: npm --prefix apps/web exec playwright install --with-deps chromium
+
+      - name: Run migrations
+        run: npm --prefix apps/api run db:migrate:deploy
+
+      - name: Seed demo data
+        env:
+          NODE_ENV: test
+        run: npm --prefix apps/api run seed
+
+      - name: Lint web
+        run: npm --prefix apps/web run lint
+
+      - name: Build web
+        run: npm --prefix apps/web run build
+
+      - name: Test web e2e
+        run: npm --prefix apps/web run test:e2e
+
+      - name: Audit web
+        run: npm audit --prefix apps/web --workspaces=false
+
+      - name: Upload Playwright report artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-artifacts
+          path: |
+            apps/web/test-results
+            apps/web/playwright-report
+          if-no-files-found: ignore

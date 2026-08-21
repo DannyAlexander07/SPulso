@@ -1,0 +1,914 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum TenantStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum CompanyStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  INVITED
+}
+
+enum ThemePreference {
+  LIGHT
+  DARK
+  STAR
+}
+
+enum EmployeeStatus {
+  ACTIVE
+  INACTIVE
+  TERMINATED
+}
+
+enum EmployeeTimelineEventType {
+  HIRED
+  REHIRED
+  TERMINATED
+  PROMOTED
+  TRANSFERRED
+  MANAGER_CHANGED
+  TEAM_CHANGED
+  PROFILE_UPDATED
+}
+
+enum AttendanceStatus {
+  PRESENT
+  LATE
+  ABSENT
+  ON_LEAVE
+}
+
+enum RequestType {
+  VACATION
+  PERMISSION
+  REMOTE_WORK
+  MEDICAL_LEAVE
+  OTHER
+}
+
+enum RequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum DocumentType {
+  CONTRACT
+  PAYSLIP
+  POLICY
+  CERTIFICATE
+  OTHER
+}
+
+enum DocumentStatus {
+  DRAFT
+  PENDING_SIGNATURE
+  SIGNED
+  EXPIRED
+}
+
+enum NotificationPriority {
+  INFO
+  WARNING
+  CRITICAL
+}
+
+enum NotificationStatus {
+  UNREAD
+  READ
+}
+
+enum NotificationType {
+  DOCUMENT_EXPIRING
+  DOCUMENT_EXPIRED
+  DOCUMENT_PENDING_SIGNATURE
+  REQUEST_PENDING
+  ATTENDANCE_LATE
+  ANNOUNCEMENT_PUBLISHED
+}
+
+enum EmailDeliveryStatus {
+  PENDING
+  SENT
+  FAILED
+  SKIPPED
+}
+
+enum AutomationRuleType {
+  DOCUMENT_EXPIRING
+  DOCUMENT_EXPIRED
+  DOCUMENT_PENDING_SIGNATURE
+  REQUEST_PENDING
+  ATTENDANCE_LATE_REPEATED
+}
+
+enum OrganizationStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum JobPositionScope {
+  COMPANY
+  GROUP
+}
+
+enum BenefitStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  EXPIRED
+}
+
+enum BenefitAudienceScope {
+  ALL
+  COMPANIES
+  TEAMS
+}
+
+enum AnnouncementStatus {
+  DRAFT
+  SCHEDULED
+  PUBLISHED
+  ARCHIVED
+}
+
+enum AnnouncementAudienceScope {
+  ALL
+  COMPANIES
+  TEAMS
+  EMPLOYEES
+}
+
+enum AnnouncementPriority {
+  NORMAL
+  IMPORTANT
+  URGENT
+}
+
+enum ExportJobStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum ExportJobType {
+  EMPLOYEES
+  DOCUMENTS
+  REQUESTS
+  USERS
+}
+
+model Tenant {
+  id        String       @id @default(uuid())
+  name      String
+  slug      String       @unique
+  status    TenantStatus @default(ACTIVE)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  companies                   Company[]
+  roles                       Role[]
+  users                       User[]
+  employees                   Employee[]
+  attendanceRecords           AttendanceRecord[]
+  requests                    EmployeeRequest[]
+  documents                   EmployeeDocument[]
+  documentFolders             DocumentFolder[]
+  auditLogs                   AuditLog[]
+  notifications               Notification[]
+  automationRules             AutomationRule[]
+  areas                       Area[]
+  jobPositions                JobPosition[]
+  workTeams                   WorkTeam[]
+  clients                     Client[]
+  employeeClientAssignments   EmployeeClientAssignment[]
+  employeeTimelineEvents      EmployeeTimelineEvent[]
+  benefits                    Benefit[]
+  benefitAudiences            BenefitAudience[]
+  announcements               Announcement[]
+  announcementAudiences       AnnouncementAudience[]
+  announcementReads           AnnouncementRead[]
+  announcementEmailDeliveries AnnouncementEmailDelivery[]
+  exportJobs                  ExportJob[]
+}
+
+model Company {
+  id                   String        @id @default(uuid())
+  tenantId             String
+  name                 String
+  slug                 String
+  ruc                  String?
+  workStartTime        String        @default("09:00")
+  lateToleranceMinutes Int           @default(15)
+  enforceAttendanceGeofence Boolean @default(false)
+  officeLatitude       Float?
+  officeLongitude      Float?
+  attendanceRadiusMeters Int         @default(200)
+  status               CompanyStatus @default(ACTIVE)
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  tenant                    Tenant                     @relation(fields: [tenantId], references: [id])
+  users                     User[]
+  employees                 Employee[]
+  attendanceRecords         AttendanceRecord[]
+  requests                  EmployeeRequest[]
+  documents                 EmployeeDocument[]
+  documentFolders           DocumentFolder[]
+  auditLogs                 AuditLog[]
+  notifications             Notification[]
+  automationRules           AutomationRule[]
+  areas                     Area[]
+  jobPositions              JobPosition[]
+  workTeams                 WorkTeam[]
+  clients                   Client[]
+  employeeClientAssignments EmployeeClientAssignment[]
+  employeeCodeSequence      EmployeeCodeSequence?
+  employeeTimelineEvents    EmployeeTimelineEvent[]
+  benefitAudiences          BenefitAudience[]
+  announcementAudiences     AnnouncementAudience[]
+  exportJobs                ExportJob[]
+
+  @@unique([tenantId, slug])
+  @@index([tenantId])
+}
+
+model EmployeeCodeSequence {
+  id         String   @id @default(uuid())
+  companyId  String   @unique
+  lastNumber Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id])
+}
+
+model Area {
+  id          String             @id @default(uuid())
+  tenantId    String
+  companyId   String
+  name        String
+  slug        String
+  description String?
+  status      OrganizationStatus @default(ACTIVE)
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  tenant                    Tenant                     @relation(fields: [tenantId], references: [id])
+  company                   Company                    @relation(fields: [companyId], references: [id])
+  employees                 Employee[]
+  jobPositions              JobPosition[]
+  workTeams                 WorkTeam[]
+  employeeClientAssignments EmployeeClientAssignment[]
+  employeeTimelineEvents    EmployeeTimelineEvent[]
+
+  @@unique([companyId, slug])
+  @@index([tenantId, status])
+  @@index([companyId, status])
+}
+
+model JobPosition {
+  id          String             @id @default(uuid())
+  tenantId    String
+  companyId   String?
+  areaId      String?
+  scope       JobPositionScope   @default(COMPANY)
+  name        String
+  slug        String
+  description String?
+  status      OrganizationStatus @default(ACTIVE)
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  tenant                 Tenant                  @relation(fields: [tenantId], references: [id])
+  company                Company?                @relation(fields: [companyId], references: [id])
+  area                   Area?                   @relation(fields: [areaId], references: [id])
+  employees              Employee[]
+  employeeTimelineEvents EmployeeTimelineEvent[]
+
+  @@index([tenantId, status])
+  @@index([tenantId, scope, status])
+  @@index([companyId, status])
+  @@index([areaId])
+}
+
+model WorkTeam {
+  id               String             @id @default(uuid())
+  tenantId         String
+  companyId        String
+  areaId           String?
+  clientId         String?
+  leaderEmployeeId String?
+  name             String
+  slug             String
+  description      String?
+  status           OrganizationStatus @default(ACTIVE)
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  tenant                    Tenant                     @relation(fields: [tenantId], references: [id])
+  company                   Company                    @relation(fields: [companyId], references: [id])
+  area                      Area?                      @relation(fields: [areaId], references: [id])
+  client                    Client?                    @relation(fields: [clientId], references: [id])
+  leader                    Employee?                  @relation("TeamLeader", fields: [leaderEmployeeId], references: [id])
+  employees                 Employee[]                 @relation("TeamMembers")
+  employeeClientAssignments EmployeeClientAssignment[]
+  employeeTimelineEvents    EmployeeTimelineEvent[]
+  benefitAudiences          BenefitAudience[]
+  announcementAudiences     AnnouncementAudience[]
+
+  @@unique([companyId, slug])
+  @@index([tenantId, status])
+  @@index([companyId, status])
+  @@index([areaId])
+  @@index([clientId])
+  @@index([leaderEmployeeId])
+}
+
+model Client {
+  id          String             @id @default(uuid())
+  tenantId    String
+  companyId   String
+  name        String
+  slug        String
+  ruc         String?
+  description String?
+  status      OrganizationStatus @default(ACTIVE)
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  tenant                    Tenant                     @relation(fields: [tenantId], references: [id])
+  company                   Company                    @relation(fields: [companyId], references: [id])
+  workTeams                 WorkTeam[]
+  employeeClientAssignments EmployeeClientAssignment[]
+
+  @@unique([companyId, slug])
+  @@index([tenantId, status])
+  @@index([companyId, status])
+}
+
+model Benefit {
+  id            String               @id @default(uuid())
+  tenantId      String
+  title         String
+  category      String
+  description   String
+  status        BenefitStatus        @default(DRAFT)
+  audienceScope BenefitAudienceScope @default(ALL)
+  startsAt      DateTime?
+  endsAt        DateTime?
+  actionLabel   String?
+  actionUrl     String?
+  imageUrl      String?
+  isHighlighted Boolean              @default(false)
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+
+  tenant    Tenant            @relation(fields: [tenantId], references: [id])
+  audiences BenefitAudience[]
+
+  @@index([tenantId, status])
+  @@index([tenantId, audienceScope])
+  @@index([startsAt])
+  @@index([endsAt])
+}
+
+model BenefitAudience {
+  id        String   @id @default(uuid())
+  tenantId  String
+  benefitId String
+  companyId String?
+  teamId    String?
+  createdAt DateTime @default(now())
+
+  tenant  Tenant    @relation(fields: [tenantId], references: [id])
+  benefit Benefit   @relation(fields: [benefitId], references: [id], onDelete: Cascade)
+  company Company?  @relation(fields: [companyId], references: [id])
+  team    WorkTeam? @relation(fields: [teamId], references: [id])
+
+  @@index([tenantId])
+  @@index([benefitId])
+  @@index([companyId])
+  @@index([teamId])
+}
+
+model Announcement {
+  id            String                    @id @default(uuid())
+  tenantId      String
+  title         String
+  message       String
+  imageUrl      String?
+  status        AnnouncementStatus        @default(DRAFT)
+  priority      AnnouncementPriority      @default(NORMAL)
+  audienceScope AnnouncementAudienceScope @default(ALL)
+  publishAt     DateTime?
+  expiresAt     DateTime?
+  sendEmail     Boolean                   @default(false)
+  isPinned      Boolean                   @default(false)
+  createdAt     DateTime                  @default(now())
+  updatedAt     DateTime                  @updatedAt
+
+  tenant          Tenant                      @relation(fields: [tenantId], references: [id])
+  audiences       AnnouncementAudience[]
+  reads           AnnouncementRead[]
+  emailDeliveries AnnouncementEmailDelivery[]
+
+  @@index([tenantId, status])
+  @@index([tenantId, audienceScope])
+  @@index([priority])
+  @@index([publishAt])
+  @@index([expiresAt])
+}
+
+model AnnouncementAudience {
+  id             String   @id @default(uuid())
+  tenantId       String
+  announcementId String
+  companyId      String?
+  teamId         String?
+  employeeId     String?
+  createdAt      DateTime @default(now())
+
+  tenant       Tenant       @relation(fields: [tenantId], references: [id])
+  announcement Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  company      Company?     @relation(fields: [companyId], references: [id])
+  team         WorkTeam?    @relation(fields: [teamId], references: [id])
+  employee     Employee?    @relation(fields: [employeeId], references: [id])
+
+  @@index([tenantId])
+  @@index([announcementId])
+  @@index([companyId])
+  @@index([teamId])
+  @@index([employeeId])
+}
+
+model AnnouncementRead {
+  id             String   @id @default(uuid())
+  tenantId       String
+  announcementId String
+  employeeId     String
+  readAt         DateTime @default(now())
+
+  tenant       Tenant       @relation(fields: [tenantId], references: [id])
+  announcement Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  employee     Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([announcementId, employeeId])
+  @@index([tenantId])
+  @@index([announcementId])
+  @@index([employeeId])
+  @@index([readAt])
+}
+
+model AnnouncementEmailDelivery {
+  id             String              @id @default(uuid())
+  tenantId       String
+  announcementId String
+  employeeId     String
+  email          String
+  status         EmailDeliveryStatus @default(PENDING)
+  subject        String
+  errorMessage   String?
+  queuedAt       DateTime            @default(now())
+  sentAt         DateTime?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  tenant       Tenant       @relation(fields: [tenantId], references: [id])
+  announcement Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  employee     Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([announcementId, employeeId])
+  @@index([tenantId, status])
+  @@index([announcementId])
+  @@index([employeeId])
+  @@index([queuedAt])
+}
+
+model Role {
+  id          String   @id @default(uuid())
+  tenantId    String
+  name        String
+  description String?
+  permissions String[] @default([])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  users  User[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+}
+
+model User {
+  id              String          @id @default(uuid())
+  tenantId        String
+  companyId       String?
+  roleId          String?
+  email           String          @unique
+  passwordHash    String
+  firstName       String
+  lastName        String
+  avatarUrl       String?
+  status          UserStatus      @default(INVITED)
+  themePreference ThemePreference @default(LIGHT)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  tenant     Tenant      @relation(fields: [tenantId], references: [id])
+  company    Company?    @relation(fields: [companyId], references: [id])
+  role       Role?       @relation(fields: [roleId], references: [id])
+  employee   Employee?
+  exportJobs ExportJob[]
+
+  @@index([tenantId])
+  @@index([companyId])
+  @@index([roleId])
+}
+
+model Employee {
+  id                String         @id @default(uuid())
+  tenantId          String
+  companyId         String
+  userId            String?        @unique
+  areaId            String?
+  positionId        String?
+  teamId            String?
+  managerId         String?
+  documentNumber    String?
+  employeeCode      String?
+  attendancePinHash String?
+  attendancePinChangeRequired Boolean @default(true)
+  personalEmail     String?
+  phoneMobile       String?
+  address           String?
+  firstName         String
+  lastName          String
+  jobTitle          String?
+  area              String?
+  hireDate          DateTime?
+  terminatedAt      DateTime?
+  terminationReason String?
+  status            EmployeeStatus @default(ACTIVE)
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  tenant                      Tenant                      @relation(fields: [tenantId], references: [id])
+  company                     Company                     @relation(fields: [companyId], references: [id])
+  user                        User?                       @relation(fields: [userId], references: [id])
+  areaRef                     Area?                       @relation(fields: [areaId], references: [id])
+  position                    JobPosition?                @relation(fields: [positionId], references: [id])
+  team                        WorkTeam?                   @relation("TeamMembers", fields: [teamId], references: [id])
+  manager                     Employee?                   @relation("EmployeeManager", fields: [managerId], references: [id])
+  directReports               Employee[]                  @relation("EmployeeManager")
+  leadingTeams                WorkTeam[]                  @relation("TeamLeader")
+  attendanceRecords           AttendanceRecord[]
+  requests                    EmployeeRequest[]
+  documents                   EmployeeDocument[]
+  announcementReads           AnnouncementRead[]
+  announcementEmailDeliveries AnnouncementEmailDelivery[]
+  announcementAudiences       AnnouncementAudience[]
+  clientAssignments           EmployeeClientAssignment[]
+  timelineEvents              EmployeeTimelineEvent[]     @relation("EmployeeTimelineOwner")
+  timelineManagerEvents       EmployeeTimelineEvent[]     @relation("EmployeeTimelineManager")
+
+  @@unique([companyId, employeeCode])
+  @@index([tenantId])
+  @@index([companyId])
+  @@index([tenantId, status, firstName, id])
+  @@index([companyId, status, firstName, id])
+  @@index([tenantId, documentNumber])
+  @@index([tenantId, employeeCode])
+  @@index([areaId])
+  @@index([positionId])
+  @@index([teamId])
+  @@index([managerId])
+}
+
+model EmployeeClientAssignment {
+  id         String             @id @default(uuid())
+  tenantId   String
+  companyId  String
+  employeeId String
+  clientId   String
+  areaId     String?
+  teamId     String?
+  role       String?
+  isPrimary  Boolean            @default(false)
+  status     OrganizationStatus @default(ACTIVE)
+  startsAt   DateTime?
+  endsAt     DateTime?
+  createdAt  DateTime           @default(now())
+  updatedAt  DateTime           @updatedAt
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id])
+  company  Company   @relation(fields: [companyId], references: [id])
+  employee Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  client   Client    @relation(fields: [clientId], references: [id])
+  area     Area?     @relation(fields: [areaId], references: [id])
+  team     WorkTeam? @relation(fields: [teamId], references: [id])
+
+  @@index([tenantId, status])
+  @@index([companyId, status])
+  @@index([employeeId, status])
+  @@index([clientId, status])
+  @@index([areaId])
+  @@index([teamId])
+}
+
+model EmployeeTimelineEvent {
+  id            String                    @id @default(uuid())
+  tenantId      String
+  employeeId    String
+  companyId     String?
+  areaId        String?
+  positionId    String?
+  teamId        String?
+  managerId     String?
+  type          EmployeeTimelineEventType
+  title         String
+  description   String?
+  effectiveDate DateTime?
+  previousData  Json?
+  newData       Json?
+  createdBy     String?
+  createdAt     DateTime                  @default(now())
+
+  tenant   Tenant       @relation(fields: [tenantId], references: [id])
+  employee Employee     @relation("EmployeeTimelineOwner", fields: [employeeId], references: [id], onDelete: Cascade)
+  company  Company?     @relation(fields: [companyId], references: [id])
+  area     Area?        @relation(fields: [areaId], references: [id])
+  position JobPosition? @relation(fields: [positionId], references: [id])
+  team     WorkTeam?    @relation(fields: [teamId], references: [id])
+  manager  Employee?    @relation("EmployeeTimelineManager", fields: [managerId], references: [id])
+
+  @@index([tenantId])
+  @@index([employeeId, createdAt])
+  @@index([companyId])
+  @@index([areaId])
+  @@index([positionId])
+  @@index([teamId])
+  @@index([managerId])
+}
+
+model AttendanceRecord {
+  id                String           @id @default(uuid())
+  tenantId          String
+  companyId         String
+  employeeId        String
+  workDate          DateTime
+  checkIn           DateTime?
+  checkOut          DateTime?
+  checkInLatitude   Float?
+  checkInLongitude  Float?
+  checkOutLatitude  Float?
+  checkOutLongitude Float?
+  status            AttendanceStatus @default(PRESENT)
+  source            String           @default("manual")
+  notes             String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id])
+  company  Company  @relation(fields: [companyId], references: [id])
+  employee Employee @relation(fields: [employeeId], references: [id])
+
+  @@unique([employeeId, workDate])
+  @@index([tenantId, workDate])
+  @@index([companyId, workDate])
+  @@index([tenantId, status, workDate])
+  @@index([companyId, status, workDate])
+  @@index([tenantId, employeeId, workDate])
+  @@index([employeeId])
+}
+
+model EmployeeRequest {
+  id          String        @id @default(uuid())
+  tenantId    String
+  companyId   String
+  employeeId  String
+  type        RequestType
+  status      RequestStatus @default(PENDING)
+  title       String
+  description String?
+  startDate   DateTime
+  endDate     DateTime?
+  decidedAt   DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id])
+  company  Company  @relation(fields: [companyId], references: [id])
+  employee Employee @relation(fields: [employeeId], references: [id])
+
+  @@index([tenantId, status])
+  @@index([companyId, status])
+  @@index([tenantId, createdAt, id])
+  @@index([companyId, createdAt, id])
+  @@index([tenantId, status, createdAt, id])
+  @@index([companyId, status, createdAt, id])
+  @@index([employeeId])
+  @@index([startDate])
+}
+
+model EmployeeDocument {
+  id                 String         @id @default(uuid())
+  tenantId           String
+  companyId          String
+  employeeId         String
+  folderId           String?
+  type               DocumentType
+  status             DocumentStatus @default(DRAFT)
+  title              String
+  folder             String         @default("General")
+  fileUrl            String?
+  fileName           String?
+  mimeType           String?
+  fileSize           Int?
+  visibleToEmployee  Boolean        @default(true)
+  requiresSignature  Boolean        @default(false)
+  notes              String?
+  issuedAt           DateTime?
+  expiresAt          DateTime?
+  signedAt           DateTime?
+  signedByName       String?
+  signedByEmail      String?
+  signatureText      String?
+  signatureIp        String?
+  signatureUserAgent String?
+  signatureHash      String?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  tenant    Tenant          @relation(fields: [tenantId], references: [id])
+  company   Company         @relation(fields: [companyId], references: [id])
+  employee  Employee        @relation(fields: [employeeId], references: [id])
+  folderRef DocumentFolder? @relation(fields: [folderId], references: [id])
+
+  @@index([tenantId, status])
+  @@index([companyId, status])
+  @@index([tenantId, folderId])
+  @@index([companyId, folderId])
+  @@index([tenantId, createdAt, id])
+  @@index([companyId, createdAt, id])
+  @@index([tenantId, status, createdAt, id])
+  @@index([companyId, status, createdAt, id])
+  @@index([tenantId, expiresAt, createdAt, id])
+  @@index([companyId, expiresAt, createdAt, id])
+  @@index([employeeId])
+  @@index([employeeId, folder])
+  @@index([employeeId, folderId])
+  @@index([type])
+}
+
+model DocumentFolder {
+  id                String             @id @default(uuid())
+  tenantId          String
+  companyId         String?
+  name              String
+  slug              String
+  description       String?
+  type              DocumentType?
+  status            OrganizationStatus @default(ACTIVE)
+  visibleToEmployee Boolean            @default(true)
+  requiresSignature Boolean            @default(false)
+  allowMultiple     Boolean            @default(true)
+  retentionYears    Int?
+  sortOrder         Int                @default(0)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  tenant    Tenant             @relation(fields: [tenantId], references: [id])
+  company   Company?           @relation(fields: [companyId], references: [id])
+  documents EmployeeDocument[]
+
+  @@unique([tenantId, slug])
+  @@index([tenantId, status])
+  @@index([companyId, status])
+  @@index([tenantId, sortOrder, name])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  tenantId   String
+  companyId  String?
+  actorType  String
+  actorLabel String
+  action     String
+  entityType String
+  entityId   String
+  summary    String
+  before     Json?
+  after      Json?
+  createdAt  DateTime @default(now())
+
+  tenant  Tenant   @relation(fields: [tenantId], references: [id])
+  company Company? @relation(fields: [companyId], references: [id])
+
+  @@index([tenantId, createdAt])
+  @@index([companyId, createdAt])
+  @@index([tenantId, createdAt, id])
+  @@index([companyId, createdAt, id])
+  @@index([entityType, entityId])
+}
+
+model Notification {
+  id          String               @id @default(uuid())
+  tenantId    String
+  companyId   String?
+  type        NotificationType
+  priority    NotificationPriority @default(INFO)
+  status      NotificationStatus   @default(UNREAD)
+  title       String
+  message     String
+  actionHref  String?
+  entityType  String?
+  entityId    String?
+  ruleKey     String
+  generatedAt DateTime             @default(now())
+  readAt      DateTime?
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+
+  tenant  Tenant   @relation(fields: [tenantId], references: [id])
+  company Company? @relation(fields: [companyId], references: [id])
+
+  @@unique([tenantId, ruleKey])
+  @@index([tenantId, status, priority])
+  @@index([companyId, status])
+  @@index([tenantId, status, priority, generatedAt, id])
+  @@index([companyId, status, priority, generatedAt, id])
+  @@index([tenantId, generatedAt, id])
+  @@index([companyId, generatedAt, id])
+  @@index([type])
+  @@index([generatedAt])
+}
+
+model AutomationRule {
+  id             String               @id @default(uuid())
+  tenantId       String
+  companyId      String?
+  type           AutomationRuleType
+  name           String
+  description    String?
+  enabled        Boolean              @default(true)
+  thresholdDays  Int?
+  thresholdHours Int?
+  thresholdCount Int?
+  windowDays     Int?
+  priority       NotificationPriority @default(WARNING)
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  tenant  Tenant   @relation(fields: [tenantId], references: [id])
+  company Company? @relation(fields: [companyId], references: [id])
+
+  @@unique([tenantId, companyId, type])
+  @@index([tenantId, enabled])
+  @@index([companyId, enabled])
+  @@index([type])
+}
+
+model ExportJob {
+  id            String          @id @default(uuid())
+  tenantId      String
+  companyId     String?
+  requestedById String
+  type          ExportJobType
+  status        ExportJobStatus @default(PENDING)
+  filters       Json?
+  filePath      String?
+  fileName      String?
+  rowCount      Int             @default(0)
+  errorMessage  String?
+  startedAt     DateTime?
+  completedAt   DateTime?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  company     Company? @relation(fields: [companyId], references: [id])
+  requestedBy User     @relation(fields: [requestedById], references: [id])
+
+  @@index([tenantId, status, createdAt])
+  @@index([companyId, status, createdAt])
+  @@index([requestedById, createdAt])
+  @@index([type, status])
+}
