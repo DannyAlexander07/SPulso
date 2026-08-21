@@ -14,6 +14,7 @@
     "start:prod": "node dist/src/main",
     "worker:exports": "node dist/src/export-jobs.worker",
     "worker:exports:dev": "ts-node src/export-jobs.worker.ts",
+    "db:generate": "prisma generate",
     "db:migrate:deploy": "prisma migrate deploy",
     "observability:check": "node dist/scripts/check-export-metrics.js",
     "seed": "ts-node prisma/seed.ts",
