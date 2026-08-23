@@ -4,6 +4,7 @@ import { ActionFeedback } from "@/components/ui/action-feedback";
 import { BackgroundExportButton } from "@/features/export-jobs/background-export-button";
 import { clientAuthHeaders } from "@/lib/api";
 import { escapeCsvValue } from "@/lib/csv";
+import { formatCalendarDate } from "@/lib/date";
 import { IMMEDIATE_EXPORT_ROW_LIMIT } from "@/lib/export-limits";
 import { Archive, Download, Loader2 } from "lucide-react";
 import { useState } from "react";
@@ -190,9 +191,5 @@ function statusLabel(status: EmployeeDocument["status"]) {
 }
 
 function formatDate(value: string) {
-  return new Intl.DateTimeFormat("es-PE", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  }).format(new Date(value));
+  return formatCalendarDate(value, { month: "2-digit" });
 }

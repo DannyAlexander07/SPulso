@@ -33,3 +33,53 @@ test("formulario de login muestra error con credenciales invalidas", async ({ pa
 
   await expect(page.locator("form")).toContainText(/credenciales|sesion|sesión|contraseña|password/i);
 });
+
+test("documentos publicados usan la ruta web y conservan la fecha de calendario", async ({ page }) => {
+  await loginAsAdmin(page);
+
+  const employeesResponse = await page.request.get(
+    "/api/spulso/trabajadores?pageSize=1",
+  );
+  expect(employeesResponse.ok()).toBeTruthy();
+
+  const employeesBody = (await employeesResponse.json()) as {
+    data?: Array<{ id: string }>;
+  };
+  const employeeId = employeesBody.data?.[0]?.id;
+  expect(employeeId).toBeTruthy();
+
+  const title = `Documento regresion ${Date.now()}`;
+  const createResponse = await page.request.post("/api/spulso/documentos", {
+    data: {
+      employeeId,
+      expiresAt: "2099-12-31",
+      fileName: "documento-regresion.pdf",
+      fileUrl: "/uploads/documentos/documento-regresion.pdf",
+      mimeType: "application/pdf",
+      status: "DRAFT",
+      title,
+      type: "OTHER",
+      visibleToEmployee: false,
+    },
+  });
+  expect(createResponse.ok()).toBeTruthy();
+
+  const created = (await createResponse.json()) as { id: string };
+
+  try {
+    await page.goto(`/documentos?buscar=${encodeURIComponent(title)}`, {
+      waitUntil: "domcontentloaded",
+    });
+
+    const card = page.locator("article").filter({ hasText: title });
+    await expect(card).toContainText(/vence 31 dic\. 2099/i);
+
+    const downloadLink = card.getByRole("link", { name: /Descargar/i });
+    await expect(downloadLink).toHaveAttribute(
+      "href",
+      "/api/spulso/uploads/documentos/documento-regresion.pdf",
+    );
+  } finally {
+    await page.request.delete(`/api/spulso/documentos/${created.id}`);
+  }
+});

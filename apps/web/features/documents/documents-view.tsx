@@ -18,6 +18,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { MetricCard } from "@/components/ui/surface";
 import { canManageDocuments } from "@/features/auth/permissions";
 import type { AuthUser } from "@/features/auth/types";
+import { formatCalendarDate } from "@/lib/date";
 import type { Company } from "@/features/companies/types";
 import type { Employee } from "@/features/employees/types";
 import { CreateDocumentForm } from "./create-document-form";
@@ -877,9 +878,5 @@ function DocumentCard({
 }
 
 function formatDate(value: string) {
-  return new Intl.DateTimeFormat("es-PE", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  }).format(new Date(value));
+  return formatCalendarDate(value);
 }

@@ -32,6 +32,8 @@ export async function apiGet<T>(path: string, fallback: T, token?: string | null
 
 export function mediaUrl(value: string | null | undefined) {
   if (!value) return "";
-  if (value.startsWith("/uploads/")) return `${getApiUrl()}${value}`;
+  // Stored media paths must always be exposed through the browser-facing BFF.
+  // Using getApiUrl() here leaks API_INTERNAL_URL during server rendering.
+  if (value.startsWith("/uploads/")) return `${BROWSER_API_URL}${value}`;
   return value;
 }
