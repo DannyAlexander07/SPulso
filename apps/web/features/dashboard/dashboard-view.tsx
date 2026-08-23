@@ -34,6 +34,7 @@ import { AppTopbar } from "@/components/layout/app-topbar";
 import type { DocumentsSummary, EmployeeDocument } from "@/features/documents/types";
 import type { Employee } from "@/features/employees/types";
 import type { RequestsSummary } from "@/features/requests/types";
+import { formatCalendarDate } from "@/lib/date";
 
 export function DashboardView({
   attendanceRecords,
@@ -784,11 +785,7 @@ function AttendanceStatus({ summary }: { summary: AttendanceSummary }) {
 }
 
 function formatDate(value: string) {
-  return new Intl.DateTimeFormat("es-PE", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  }).format(new Date(value));
+  return formatCalendarDate(value);
 }
 
 function formatTime(value: string | null) {
