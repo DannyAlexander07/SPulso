@@ -34,7 +34,7 @@ export function CompaniesView({
         <section className="min-w-0">
           <AppTopbar currentUser={currentUser} eyebrow="Empresas" title="Gestion multiempresa" />
 
-          <div className="mx-auto max-w-7xl px-4 py-4 pb-24 sm:px-5 lg:px-6 lg:pb-4">
+          <div className="mx-auto max-w-[1500px] px-4 py-4 pb-24 sm:px-5 lg:px-6 lg:pb-4">
             <section className="grid gap-4 md:grid-cols-3">
               <MetricCard icon={Layers3} label="Grupo empresarial" value="Grupo SP" />
               <MetricCard

@@ -83,3 +83,33 @@ test("documentos publicados usan la ruta web y conservan la fecha de calendario"
     await page.request.delete(`/api/spulso/documentos/${created.id}`);
   }
 });
+
+test("organizacion aprovecha el ancho disponible sin desplazarse a la derecha", async ({ page }) => {
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await loginAsAdmin(page);
+  await page.goto("/organizacion", { waitUntil: "domcontentloaded" });
+
+  const workspace = page
+    .getByRole("heading", { name: /Ordena personas en areas/i })
+    .locator('xpath=ancestor::div[contains(@class, "mx-auto")][1]');
+  const sidebar = page.locator("aside");
+  const [workspaceBox, sidebarBox] = await Promise.all([
+    workspace.boundingBox(),
+    sidebar.boundingBox(),
+  ]);
+
+  expect(workspaceBox).not.toBeNull();
+  expect(sidebarBox).not.toBeNull();
+
+  const gapFromSidebar =
+    workspaceBox!.x - (sidebarBox!.x + sidebarBox!.width);
+  expect(gapFromSidebar).toBeLessThanOrEqual(120);
+  expect(workspaceBox!.width).toBeGreaterThanOrEqual(1450);
+
+  const hasHorizontalOverflow = await page.evaluate(
+    () =>
+      document.documentElement.scrollWidth >
+      document.documentElement.clientWidth,
+  );
+  expect(hasHorizontalOverflow).toBe(false);
+});

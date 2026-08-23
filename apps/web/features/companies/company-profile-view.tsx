@@ -38,7 +38,7 @@ export function CompanyProfileView({
         <section className="min-w-0">
           <AppTopbar currentUser={currentUser} eyebrow="Empresas" title="Perfil 360 de empresa" />
 
-          <div className="mx-auto max-w-7xl px-4 py-4 pb-24 sm:px-5 lg:px-6 lg:pb-4">
+          <div className="mx-auto max-w-[1500px] px-4 py-4 pb-24 sm:px-5 lg:px-6 lg:pb-4">
             <Link
               className="mb-4 inline-flex h-10 items-center gap-2 rounded-xl border border-[#e1e5eb] bg-white px-3 text-sm font-semibold text-[#475467] shadow-sm transition hover:bg-[#f8fafc]"
               href="/empresas"

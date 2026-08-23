@@ -39,7 +39,7 @@ export async function AppTopbar({
 
   return (
     <header className="sticky top-0 z-10 border-b border-[#dfe5ec] bg-white/86 px-3 py-2 pl-16 shadow-[0_8px_24px_rgba(15,23,42,0.03)] backdrop-blur-xl sm:pl-16 sm:pr-4 lg:px-5">
-      <div className="mx-auto flex max-w-7xl items-center justify-between gap-3">
+      <div className="mx-auto flex max-w-[1500px] items-center justify-between gap-3">
         <div className="min-w-0">
           <p className="truncate text-[10px] font-semibold uppercase tracking-[0.14em] text-[#667085] sm:text-xs">
             {eyebrow}

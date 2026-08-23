@@ -57,7 +57,7 @@ export function NotificationsView({
             title="Centro de notificaciones"
           />
 
-          <div className="mx-auto max-w-7xl px-4 py-4 pb-24 sm:px-5 lg:px-6 lg:pb-4">
+          <div className="mx-auto max-w-[1500px] px-4 py-4 pb-24 sm:px-5 lg:px-6 lg:pb-4">
             <section className="grid gap-3 lg:grid-cols-4">
               <MetricCard
                 icon={BellRing}

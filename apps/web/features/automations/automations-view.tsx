@@ -36,7 +36,7 @@ export function AutomationsView({
         <section className="min-w-0">
           <AppTopbar currentUser={currentUser} eyebrow="Automatizaciones" title="Reglas inteligentes" />
 
-          <div className="mx-auto max-w-7xl px-4 py-4 pb-24 sm:px-5 lg:px-6 lg:pb-4">
+          <div className="mx-auto max-w-[1500px] px-4 py-4 pb-24 sm:px-5 lg:px-6 lg:pb-4">
             <section className="grid gap-3 lg:grid-cols-3">
               <MetricCard icon={Sparkles} label="Reglas creadas" value={rules.length.toString()} />
               <MetricCard icon={Power} label="Reglas activas" tone="success" value={enabledRules.length.toString()} />
