@@ -74,7 +74,7 @@ test("documentos publicados usan la ruta web y conservan la fecha de calendario"
     const card = page.locator("article").filter({ hasText: title });
     await expect(card).toContainText(/vence 31 dic\. 2099/i);
 
-    const downloadLink = card.getByRole("link", { name: /Descargar/i });
+    const downloadLink = card.getByRole("link", { name: /Abrir/i });
     await expect(downloadLink).toHaveAttribute(
       "href",
       "/api/spulso/uploads/documentos/documento-regresion.pdf",
