@@ -7,6 +7,8 @@ RUN npm ci
 
 FROM deps AS build
 
+ARG NEXT_PUBLIC_API_URL=http://localhost:3001
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 COPY apps/web ./
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build

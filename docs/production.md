@@ -23,6 +23,9 @@ Esta guia deja la separacion minima para operar SPulso sin mezclar procesos:
    `azure`.
 4. Conserva `TZ=America/Lima`, `TRUST_PROXY_HOPS=1` y publica los puertos
    loopback solo detras del proxy TLS. No expongas directamente `3000` o `3001`.
+5. Si la VPS ya usa esos puertos, define `SPULSO_WEB_HOST_PORT` y
+   `SPULSO_API_HOST_PORT`. Ambos continúan enlazados exclusivamente a
+   `127.0.0.1`.
 
 No uses `FILE_STORAGE_DRIVER=local` para escalar horizontalmente: dos replicas
 no compartirian los mismos archivos.

@@ -40,7 +40,7 @@ services:
       timeout: 5s
       retries: 3
     ports:
-      - "127.0.0.1:3001:3001"
+      - "127.0.0.1:${SPULSO_API_HOST_PORT:-3001}:3001"
     volumes:
       - api-uploads:/app/apps/api/uploads
 
@@ -81,6 +81,8 @@ services:
     build:
       context: .
       dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
     restart: unless-stopped
     depends_on:
       api:
@@ -91,7 +93,7 @@ services:
       PORT: 3000
       TZ: America/Lima
     ports:
-      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:${SPULSO_WEB_HOST_PORT:-3000}:3000"
 
 volumes:
   api-uploads:
