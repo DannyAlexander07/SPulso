@@ -70,7 +70,7 @@ export function AttendanceView({
         <section className="min-w-0">
           <AppTopbar currentUser={currentUser} eyebrow="Asistencia" title="Control diario" />
 
-          <div className="mx-auto max-w-[1500px] px-4 py-3 pb-24 sm:px-5 lg:px-6 lg:pb-4">
+          <div className="w-full px-4 py-3 pb-24 sm:px-5 lg:px-6 lg:pb-4">
             <section className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_340px]">
               <div className="animate-rise rounded-[18px] border border-[#e1e5eb] bg-white p-4 shadow-sm">
                 <div className="inline-flex items-center gap-2 rounded-full border border-[#c7d2fe] bg-[#f7f7ff] px-3 py-1 text-xs font-semibold text-[#4f46e5]">

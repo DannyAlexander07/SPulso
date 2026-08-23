@@ -56,7 +56,7 @@ export function AttendanceReportView({
         <section className="min-w-0">
           <AppTopbar currentUser={currentUser} eyebrow="Asistencia" title="Reporte por fechas" />
 
-          <div className="mx-auto max-w-[1500px] px-4 py-4 pb-24 sm:px-5 lg:px-6 lg:pb-4">
+          <div className="w-full px-4 py-4 pb-24 sm:px-5 lg:px-6 lg:pb-4">
             <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_390px]">
               <Surface compact>
                 <Link

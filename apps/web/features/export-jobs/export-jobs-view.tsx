@@ -35,7 +35,7 @@ export function ExportJobsView({
             title="Mis reportes"
           />
 
-          <div className="mx-auto max-w-[1500px] px-4 py-3 pb-24 sm:px-5 lg:px-6 lg:pb-4">
+          <div className="w-full px-4 py-3 pb-24 sm:px-5 lg:px-6 lg:pb-4">
             <section className="grid gap-3 md:grid-cols-4">
               <MetricCard
                 icon={FileDown}

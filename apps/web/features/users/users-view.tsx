@@ -43,7 +43,7 @@ export function UsersView({
         <section className="min-w-0">
           <AppTopbar currentUser={currentUser} eyebrow="Usuarios" title="Roles y accesos" />
 
-          <div className="mx-auto max-w-[1500px] px-4 py-3 pb-24 sm:px-5 lg:px-6 lg:pb-4">
+          <div className="w-full px-4 py-3 pb-24 sm:px-5 lg:px-6 lg:pb-4">
             <section className="grid gap-3 md:grid-cols-3">
               <MetricCard icon={UsersRound} label="Usuarios filtrados" value={pagination.total.toString()} />
               <MetricCard icon={ShieldCheck} label="Roles disponibles" tone="success" value={roles.length.toString()} />

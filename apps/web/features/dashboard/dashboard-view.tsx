@@ -96,7 +96,7 @@ export function DashboardView({
         <section className="min-w-0">
           <AppTopbar currentUser={currentUser} eyebrow="Dashboard" title="Centro operativo" />
 
-          <div className="mx-auto max-w-[1500px] px-3 py-3 pb-24 sm:px-4 lg:px-5 lg:pb-4">
+          <div className="w-full px-3 py-3 pb-24 sm:px-4 lg:px-5 lg:pb-4">
             <section className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_300px]">
               <div className="animate-rise overflow-hidden rounded-[20px] border border-[#e1e5eb] bg-white shadow-[0_10px_30px_rgba(15,23,42,0.04)]">
                 <div className="grid gap-3 p-3.5 lg:grid-cols-[minmax(0,1fr)_270px] lg:p-4">

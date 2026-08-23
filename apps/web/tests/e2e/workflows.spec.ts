@@ -91,7 +91,7 @@ test("organizacion aprovecha el ancho disponible sin desplazarse a la derecha", 
 
   const workspace = page
     .getByRole("heading", { name: /Ordena personas en areas/i })
-    .locator('xpath=ancestor::div[contains(@class, "mx-auto")][1]');
+    .locator('xpath=ancestor::div[contains(@class, "pb-24")][1]');
   const sidebar = page.locator("aside");
   const [workspaceBox, sidebarBox] = await Promise.all([
     workspace.boundingBox(),
@@ -103,8 +103,8 @@ test("organizacion aprovecha el ancho disponible sin desplazarse a la derecha", 
 
   const gapFromSidebar =
     workspaceBox!.x - (sidebarBox!.x + sidebarBox!.width);
-  expect(gapFromSidebar).toBeLessThanOrEqual(120);
-  expect(workspaceBox!.width).toBeGreaterThanOrEqual(1450);
+  expect(gapFromSidebar).toBeLessThanOrEqual(1);
+  expect(workspaceBox!.width).toBeGreaterThanOrEqual(1650);
 
   const hasHorizontalOverflow = await page.evaluate(
     () =>

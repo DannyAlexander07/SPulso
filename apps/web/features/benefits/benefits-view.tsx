@@ -81,7 +81,7 @@ export function BenefitsWorkspace({
   }, [query, scope, status]);
 
   return (
-    <div className="mx-auto max-w-[1500px] px-4 py-3 pb-24 sm:px-5 lg:px-6 lg:pb-4">
+    <div className="w-full px-4 py-3 pb-24 sm:px-5 lg:px-6 lg:pb-4">
       <section className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_340px]">
         <Surface>
           <span className="inline-flex items-center gap-2 rounded-full border border-[#c7d2fe] bg-[#f7f7ff] px-3 py-1 text-xs font-bold text-[#4f46e5]">

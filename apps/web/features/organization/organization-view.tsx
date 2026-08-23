@@ -85,7 +85,7 @@ export function OrganizationWorkspace({
   }
 
   return (
-          <div className="mx-auto max-w-[1500px] px-4 py-3 pb-24 sm:px-5 lg:px-6 lg:pb-4">
+          <div className="w-full px-4 py-3 pb-24 sm:px-5 lg:px-6 lg:pb-4">
             <Surface>
               <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                 <div className="max-w-3xl">

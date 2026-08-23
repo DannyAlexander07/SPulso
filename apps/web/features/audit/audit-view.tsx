@@ -47,7 +47,7 @@ export function AuditView({
             title="Trazabilidad del sistema"
           />
 
-          <div className="mx-auto max-w-[1500px] px-4 py-4 pb-24 sm:px-5 lg:px-6 lg:pb-4">
+          <div className="w-full px-4 py-4 pb-24 sm:px-5 lg:px-6 lg:pb-4">
             {!canView ? (
               <Surface>
                 <EmptyState

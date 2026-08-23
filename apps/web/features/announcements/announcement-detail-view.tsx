@@ -8,7 +8,7 @@ export function AnnouncementDetailView({ announcement }: { announcement: Announc
   const metrics = announcement.metrics;
 
   return (
-    <div className="mx-auto max-w-[1500px] px-4 py-4 pb-24 sm:px-5 lg:px-6 lg:pb-4">
+    <div className="w-full px-4 py-4 pb-24 sm:px-5 lg:px-6 lg:pb-4">
       <section className="rounded-2xl border border-[#e1e5eb] bg-white p-5 shadow-sm">
         <Link
           className="inline-flex h-9 items-center gap-2 rounded-xl border border-[#d8dee8] bg-white px-3 text-xs font-bold text-[#475467] transition hover:border-[#4f46e5] hover:text-[#4f46e5]"

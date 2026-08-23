@@ -53,7 +53,7 @@ export function EmployeeProfileView({
         <section className="min-w-0">
           <AppTopbar currentUser={currentUser} eyebrow="Trabajadores" title="Perfil 360" />
 
-          <div className="mx-auto max-w-[1500px] px-4 py-4 pb-24 sm:px-5 lg:px-6 lg:pb-4">
+          <div className="w-full px-4 py-4 pb-24 sm:px-5 lg:px-6 lg:pb-4">
             <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <LinkButton href="/trabajadores" icon={ArrowLeft} size="md" variant="secondary">
                 Volver al directorio
