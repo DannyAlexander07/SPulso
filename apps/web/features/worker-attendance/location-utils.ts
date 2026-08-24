@@ -35,39 +35,7 @@ export async function requestBrowserLocation(): Promise<BrowserLocation> {
 
   const latitude = position.coords.latitude;
   const longitude = position.coords.longitude;
-  const label = await resolveLocationLabel(latitude, longitude);
+  const label = "Ubicacion GPS capturada";
 
   return { latitude, longitude, label };
-}
-
-async function resolveLocationLabel(latitude: number, longitude: number) {
-  try {
-    const response = await fetch(
-      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}&zoom=16&addressdetails=1`,
-      {
-        headers: { "Accept-Language": "es" },
-      },
-    );
-
-    if (!response.ok) {
-      return "Ubicacion GPS validada";
-    }
-
-    const data = (await response.json()) as {
-      address?: Record<string, string | undefined>;
-      name?: string;
-    };
-    const address = data.address ?? {};
-    const place = [
-      address.road ?? address.neighbourhood ?? address.suburb ?? data.name,
-      address.city ?? address.town ?? address.district ?? address.province,
-    ]
-      .filter(Boolean)
-      .slice(0, 2)
-      .join(", ");
-
-    return place || "Ubicacion GPS validada";
-  } catch {
-    return "Ubicacion GPS validada";
-  }
 }

@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+} from '@nestjs/common';
 import {
   AnnouncementAudienceScope,
   AnnouncementStatus,
@@ -9,11 +13,17 @@ import {
   Prisma,
 } from '@prisma/client';
 import { createHash } from 'crypto';
+import { existsSync, readFileSync, unlinkSync } from 'fs';
+import { basename, resolve, sep } from 'path';
 import { PrismaService } from '../../database/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import type { AuthUser } from '../auth/jwt-auth.guard';
 import type { CreateRequestDto } from '../requests/dto/create-request.dto';
 import { RequestsService } from '../requests/requests.service';
+import { resolveLocalDocumentUploadPath } from '../documents/documents.service';
+
+const activeDocumentSignatures = new Set<string>();
+const activeProfilePhotoUpdates = new Set<string>();
 
 @Injectable()
 export class PortalService {
@@ -89,6 +99,7 @@ export class PortalService {
           signedByEmail: true,
           signatureText: true,
           signatureHash: true,
+          signedContentHash: true,
           createdAt: true,
           folderRef: {
             select: {
@@ -378,6 +389,27 @@ export class PortalService {
     signatureText?: string,
     evidence?: { ip?: string | null; userAgent?: string | null },
   ) {
+    const claimKey = `${user.tenantId}:${user.sub}:${id}`;
+    if (activeDocumentSignatures.has(claimKey)) {
+      throw new ConflictException(
+        'La firma de este documento ya se esta procesando.',
+      );
+    }
+
+    activeDocumentSignatures.add(claimKey);
+    try {
+      return await this.signDocumentClaimed(user, id, signatureText, evidence);
+    } finally {
+      activeDocumentSignatures.delete(claimKey);
+    }
+  }
+
+  private async signDocumentClaimed(
+    user: AuthUser,
+    id: string,
+    signatureText?: string,
+    evidence?: { ip?: string | null; userAgent?: string | null },
+  ) {
     const documentId = this.toOptionalString(id);
 
     if (!documentId) {
@@ -397,6 +429,9 @@ export class PortalService {
         visibleToEmployee: true,
         requiresSignature: true,
         title: true,
+        type: true,
+        fileUrl: true,
+        updatedAt: true,
         employee: {
           select: {
             firstName: true,
@@ -443,12 +478,26 @@ export class PortalService {
       );
     }
 
+    const filePath = resolveLocalDocumentUploadPath(document.fileUrl);
+    if (!filePath || !existsSync(filePath)) {
+      throw new BadRequestException(
+        'El archivo del documento no esta disponible para firmar.',
+      );
+    }
+
     const signedAt = new Date();
+    const signedContentHash = createHash('sha256')
+      .update(readFileSync(filePath))
+      .digest('hex');
     const signatureHash = createHash('sha256')
       .update(
         [
           document.id,
           document.employeeId,
+          document.companyId,
+          document.type,
+          document.title,
+          signedContentHash,
           normalizedSignature,
           signedAt.toISOString(),
           evidence?.ip ?? '',
@@ -457,51 +506,74 @@ export class PortalService {
       )
       .digest('hex');
 
-    const signedDocument = await this.prisma.employeeDocument.update({
-      where: { id: document.id },
-      data: {
-        status: DocumentStatus.SIGNED,
-        signedAt,
-        signedByName: `${document.employee.firstName} ${document.employee.lastName}`,
-        signedByEmail: document.employee.personalEmail ?? user.email,
-        signatureText: normalizedSignature,
-        signatureIp: this.toOptionalString(evidence?.ip),
-        signatureUserAgent: this.toOptionalString(evidence?.userAgent),
-        signatureHash,
-      },
-      select: {
-        id: true,
-        type: true,
-        status: true,
-        title: true,
-        folder: true,
-        fileUrl: true,
-        issuedAt: true,
-        expiresAt: true,
-        signedAt: true,
-        signedByName: true,
-        signedByEmail: true,
-        signatureText: true,
-        signatureHash: true,
-        createdAt: true,
-      },
-    });
+    const signedDocument = await this.prisma.$transaction(async (tx) => {
+      const transition = await tx.employeeDocument.updateMany({
+        where: {
+          id: document.id,
+          employeeId: document.employeeId,
+          requiresSignature: true,
+          status: DocumentStatus.PENDING_SIGNATURE,
+          tenantId: user.tenantId,
+          updatedAt: document.updatedAt,
+        },
+        data: {
+          status: DocumentStatus.SIGNED,
+          signedAt,
+          signedByName: `${document.employee.firstName} ${document.employee.lastName}`,
+          signedByEmail: document.employee.personalEmail ?? user.email,
+          signatureText: normalizedSignature,
+          signatureIp: this.toOptionalString(evidence?.ip),
+          signatureUserAgent: this.toOptionalString(evidence?.userAgent),
+          signatureHash,
+          signedContentHash,
+        },
+      });
 
-    await this.auditService.write({
-      tenantId: user.tenantId,
-      companyId: document.companyId,
-      actorType: 'user',
-      actorLabel: user.email,
-      action: 'portal_document.signed',
-      entityType: 'EmployeeDocument',
-      entityId: document.id,
-      summary: `${document.employee.firstName} ${document.employee.lastName} firmo el documento ${document.title}.`,
-      before: { status: DocumentStatus.PENDING_SIGNATURE },
-      after: {
-        status: DocumentStatus.SIGNED,
-        signatureText: normalizedSignature,
-        signatureHash,
-      },
+      if (transition.count !== 1) {
+        throw new ConflictException(
+          'El documento ya fue firmado o cambio mientras se procesaba la firma.',
+        );
+      }
+
+      await tx.auditLog.create({
+        data: {
+          tenantId: user.tenantId,
+          companyId: document.companyId,
+          actorType: 'user',
+          actorLabel: user.email,
+          action: 'portal_document.signed',
+          entityType: 'EmployeeDocument',
+          entityId: document.id,
+          summary: `${document.employee.firstName} ${document.employee.lastName} firmo el documento ${document.title}.`,
+          before: { status: DocumentStatus.PENDING_SIGNATURE },
+          after: {
+            status: DocumentStatus.SIGNED,
+            signatureText: normalizedSignature,
+            signatureHash,
+          },
+        },
+      });
+
+      return tx.employeeDocument.findUniqueOrThrow({
+        where: { id: document.id },
+        select: {
+          id: true,
+          type: true,
+          status: true,
+          title: true,
+          folder: true,
+          fileUrl: true,
+          issuedAt: true,
+          expiresAt: true,
+          signedAt: true,
+          signedByName: true,
+          signedByEmail: true,
+          signatureText: true,
+          signatureHash: true,
+          signedContentHash: true,
+          createdAt: true,
+        },
+      });
     });
 
     return signedDocument;
@@ -588,7 +660,46 @@ export class PortalService {
   }
 
   async updateProfilePhoto(user: AuthUser, avatarUrl: string | null) {
+    const claimKey = `${user.tenantId}:${user.sub}`;
+    if (activeProfilePhotoUpdates.has(claimKey)) {
+      throw new ConflictException(
+        'Ya se esta procesando otra foto para este perfil.',
+      );
+    }
+
+    activeProfilePhotoUpdates.add(claimKey);
+    try {
+      return await this.updateProfilePhotoClaimed(user, avatarUrl);
+    } finally {
+      activeProfilePhotoUpdates.delete(claimKey);
+    }
+  }
+
+  private async updateProfilePhotoClaimed(
+    user: AuthUser,
+    avatarUrl: string | null,
+  ) {
     const normalizedAvatarUrl = this.toOptionalUploadPath(avatarUrl);
+
+    const currentUser = await this.prisma.user.findUnique({
+      where: { id: user.sub },
+      select: { avatarUrl: true },
+    });
+    if (!currentUser) {
+      throw new BadRequestException('La sesion no corresponde a un usuario.');
+    }
+
+    if (
+      normalizedAvatarUrl &&
+      normalizedAvatarUrl !== currentUser.avatarUrl &&
+      !normalizedAvatarUrl.startsWith(
+        `/uploads/usuarios/${user.tenantId}--${user.sub}--`,
+      )
+    ) {
+      throw new BadRequestException(
+        'La foto seleccionada no pertenece a tu perfil.',
+      );
+    }
 
     const employee = await this.prisma.employee.findFirst({
       where: {
@@ -605,25 +716,60 @@ export class PortalService {
       );
     }
 
-    await this.prisma.user.update({
-      where: { id: user.sub },
-      data: { avatarUrl: normalizedAvatarUrl },
-      select: { id: true },
+    await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.user.updateMany({
+        where: {
+          id: user.sub,
+          tenantId: user.tenantId,
+          avatarUrl: currentUser.avatarUrl,
+        },
+        data: { avatarUrl: normalizedAvatarUrl },
+      });
+
+      if (updated.count !== 1) {
+        throw new ConflictException(
+          'La foto del perfil cambio mientras se procesaba la solicitud.',
+        );
+      }
+
+      await tx.auditLog.create({
+        data: {
+          tenantId: user.tenantId,
+          companyId: null,
+          actorType: 'user',
+          actorLabel: user.email,
+          action: 'portal.photo.updated',
+          entityType: 'employee',
+          entityId: employee.id,
+          summary: 'Se actualizo la foto de perfil desde el portal trabajador.',
+          before: { avatarUrl: currentUser.avatarUrl },
+          after: { avatarUrl: normalizedAvatarUrl },
+        },
+      });
     });
 
-    await this.auditService.write({
-      tenantId: user.tenantId,
-      companyId: null,
-      actorType: 'user',
-      actorLabel: user.email,
-      action: 'portal.photo.updated',
-      entityType: 'employee',
-      entityId: employee.id,
-      summary: 'Se actualizo la foto de perfil desde el portal trabajador.',
-      after: { avatarUrl: normalizedAvatarUrl },
-    });
+    if (
+      currentUser.avatarUrl &&
+      currentUser.avatarUrl !== normalizedAvatarUrl
+    ) {
+      await this.deleteUnreferencedAvatar(currentUser.avatarUrl).catch(
+        () => undefined,
+      );
+    }
 
     return { avatarUrl: normalizedAvatarUrl };
+  }
+
+  private async deleteUnreferencedAvatar(avatarUrl: string) {
+    const references = await this.prisma.user.count({ where: { avatarUrl } });
+    if (references > 0 || !avatarUrl.startsWith('/uploads/usuarios/')) return;
+
+    const fileName = basename(avatarUrl);
+    const root = resolve(process.cwd(), 'uploads', 'usuarios');
+    const filePath = resolve(root, fileName);
+    if (filePath.startsWith(`${root}${sep}`) && existsSync(filePath)) {
+      unlinkSync(filePath);
+    }
   }
 
   private employeeSelect() {

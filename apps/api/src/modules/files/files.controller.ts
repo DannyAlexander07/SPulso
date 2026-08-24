@@ -16,8 +16,15 @@ import { randomBytes } from 'crypto';
 import { createReadStream } from 'fs';
 import { diskStorage } from 'multer';
 import { basename, extname, join, resolve, sep } from 'path';
-import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync } from 'fs';
-import type { Response } from 'express';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  unlinkSync,
+} from 'fs';
+import type { Request, Response } from 'express';
 import { PrismaService } from '../../database/prisma.service';
 import {
   assertCompanyAccess,
@@ -32,8 +39,6 @@ import { PermissionsGuard } from '../auth/permissions.guard';
 const allowedMimeTypes = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const allowedDocumentMimeTypes = new Set([
   'application/pdf',
-  'application/msword',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'image/jpeg',
   'image/png',
   'image/webp',
@@ -43,6 +48,8 @@ const userUploadRoot = join(process.cwd(), 'uploads', 'usuarios');
 const documentUploadRoot = join(process.cwd(), 'uploads', 'documentos');
 const userImageMaxSize = 5 * 1024 * 1024;
 const documentMaxSize = 25 * 1024 * 1024;
+const documentUploadUserQuota = 2 * 1024 * 1024 * 1024;
+const documentUploadTenantQuota = 20 * 1024 * 1024 * 1024;
 
 @Controller()
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -94,9 +101,14 @@ export class FilesController {
           mkdirSync(uploadRoot, { recursive: true });
           callback(null, uploadRoot);
         },
-        filename: (_request, file, callback) => {
+        filename: (request, file, callback) => {
+          const user = (request as Request & { user?: AuthUser }).user;
+          if (!user?.tenantId || !user.sub) {
+            callback(new Error('Sesion requerida.'), '');
+            return;
+          }
           const extension = safeExtension(file.mimetype);
-          const name = `${Date.now()}-${randomSuffix()}${extension}`;
+          const name = `${user.tenantId}--${user.sub}--${Date.now()}-${randomSuffix()}${extension}`;
           callback(null, name);
         },
       }),
@@ -116,6 +128,7 @@ export class FilesController {
     }),
   )
   uploadAnnouncementImage(
+    @CurrentUser() actor: AuthUser,
     @UploadedFile() file: Express.Multer.File | undefined,
   ) {
     if (!file) {
@@ -147,9 +160,14 @@ export class FilesController {
           mkdirSync(userUploadRoot, { recursive: true });
           callback(null, userUploadRoot);
         },
-        filename: (_request, file, callback) => {
+        filename: (request, file, callback) => {
+          const user = (request as Request & { user?: AuthUser }).user;
+          if (!user?.tenantId || !user.sub) {
+            callback(new Error('Sesion requerida.'), '');
+            return;
+          }
           const extension = safeExtension(file.mimetype);
-          const name = `${Date.now()}-${randomSuffix()}${extension}`;
+          const name = `${user.tenantId}--${user.sub}--${Date.now()}-${randomSuffix()}${extension}`;
           callback(null, name);
         },
       }),
@@ -168,7 +186,10 @@ export class FilesController {
       },
     }),
   )
-  uploadUserImage(@UploadedFile() file: Express.Multer.File | undefined) {
+  uploadUserImage(
+    @CurrentUser() actor: AuthUser,
+    @UploadedFile() file: Express.Multer.File | undefined,
+  ) {
     if (!file) {
       throw new BadRequestException('Selecciona una imagen para subir.');
     }
@@ -198,9 +219,14 @@ export class FilesController {
           mkdirSync(documentUploadRoot, { recursive: true });
           callback(null, documentUploadRoot);
         },
-        filename: (_request, file, callback) => {
+        filename: (request, file, callback) => {
+          const user = (request as Request & { user?: AuthUser }).user;
+          if (!user?.tenantId) {
+            callback(new Error('Sesion requerida.'), '');
+            return;
+          }
           const extension = safeDocumentExtension(file.mimetype);
-          const name = `${Date.now()}-${randomSuffix()}${extension}`;
+          const name = `${user.tenantId}--${user.sub}--${Date.now()}-${randomSuffix()}${extension}`;
           callback(null, name);
         },
       }),
@@ -208,7 +234,7 @@ export class FilesController {
         if (!allowedDocumentMimeTypes.has(file.mimetype)) {
           callback(
             new BadRequestException(
-              'Solo se permiten PDF, Word o imagenes JPG, PNG y WebP.',
+              'Solo se permiten PDF o imagenes JPG, PNG y WebP.',
             ),
             false,
           );
@@ -219,7 +245,10 @@ export class FilesController {
       },
     }),
   )
-  uploadDocumentFile(@UploadedFile() file: Express.Multer.File | undefined) {
+  uploadDocumentFile(
+    @CurrentUser() actor: AuthUser,
+    @UploadedFile() file: Express.Multer.File | undefined,
+  ) {
     if (!file) {
       throw new BadRequestException('Selecciona un archivo para subir.');
     }
@@ -227,8 +256,15 @@ export class FilesController {
     if (!hasValidDocumentSignature(file.path, file.mimetype)) {
       unlinkSync(file.path);
       throw new BadRequestException(
-        'El archivo no coincide con un PDF, Word o imagen valida.',
+        'El archivo no coincide con un PDF o imagen valida.',
       );
+    }
+
+    try {
+      this.assertDocumentUploadQuota(actor);
+    } catch (error) {
+      unlinkSync(file.path);
+      throw error;
     }
 
     return {
@@ -237,6 +273,31 @@ export class FilesController {
       size: file.size,
       url: `/uploads/documentos/${file.filename}`,
     };
+  }
+
+  private assertDocumentUploadQuota(actor: AuthUser) {
+    const tenantPrefix = `${actor.tenantId}--`;
+    const userPrefix = `${actor.tenantId}--${actor.sub}--`;
+    let tenantBytes = 0;
+    let userBytes = 0;
+
+    for (const fileName of readdirSync(documentUploadRoot)) {
+      if (!fileName.startsWith(tenantPrefix)) continue;
+      const filePath = join(documentUploadRoot, fileName);
+      const stats = statSync(filePath);
+      if (!stats.isFile()) continue;
+      tenantBytes += stats.size;
+      if (fileName.startsWith(userPrefix)) userBytes += stats.size;
+    }
+
+    if (
+      userBytes > documentUploadUserQuota ||
+      tenantBytes > documentUploadTenantQuota
+    ) {
+      throw new ForbiddenException(
+        'Se alcanzo la cuota segura de archivos documentales. Elimina cargas no utilizadas o solicita una ampliacion controlada.',
+      );
+    }
   }
 
   private async assertMediaAccess(
@@ -262,7 +323,12 @@ export class FilesController {
       });
 
       if (!document) {
-        this.requirePermission(permissions, 'documents.manage');
+        this.requireOwnedPendingUpload(
+          actor,
+          fileUrl,
+          'documentos',
+          'documents.manage',
+        );
         return;
       }
 
@@ -292,7 +358,12 @@ export class FilesController {
       });
 
       if (!owner) {
-        this.requirePermission(permissions, 'users.manage');
+        this.requireOwnedPendingUpload(
+          actor,
+          fileUrl,
+          'usuarios',
+          'users.manage',
+        );
         return;
       }
 
@@ -325,7 +396,12 @@ export class FilesController {
     });
 
     if (!announcement) {
-      this.requirePermission(permissions, 'announcements.manage');
+      this.requireOwnedPendingUpload(
+        actor,
+        fileUrl,
+        'comunicados',
+        'announcements.manage',
+      );
       return;
     }
 
@@ -369,6 +445,19 @@ export class FilesController {
     }
 
     throw new ForbiddenException('No tienes acceso a este archivo.');
+  }
+
+  private requireOwnedPendingUpload(
+    actor: AuthUser,
+    fileUrl: string,
+    category: 'comunicados' | 'documentos' | 'usuarios',
+    permission: string,
+  ) {
+    this.requirePermission(actor.permissions ?? [], permission);
+    const expectedPrefix = `/uploads/${category}/${actor.tenantId}--${actor.sub}--`;
+    if (!fileUrl.startsWith(expectedPrefix)) {
+      throw new NotFoundException('El archivo no existe.');
+    }
   }
 
   private requirePermission(permissions: string[], permission: string) {
@@ -443,28 +532,17 @@ function hasValidDocumentSignature(path: string, mimeType: string) {
   const bytes = file.subarray(0, 8);
 
   if (mimeType === 'application/pdf') {
-    return bytes.toString('ascii', 0, 5) === '%PDF-';
-  }
-
-  if (mimeType === 'application/msword') {
-    return bytes.equals(
-      Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]),
-    );
-  }
-
-  if (
-    mimeType ===
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-  ) {
-    const hasZipSignature =
-      bytes[0] === 0x50 &&
-      bytes[1] === 0x4b &&
-      [0x03, 0x05, 0x07].includes(bytes[2] ?? -1) &&
-      [0x04, 0x06, 0x08].includes(bytes[3] ?? -1);
+    const content = file
+      .toString('latin1')
+      .replace(/#([0-9a-f]{2})/gi, (_match, hex: string) =>
+        String.fromCharCode(Number.parseInt(hex, 16)),
+      );
     return (
-      hasZipSignature &&
-      file.includes(Buffer.from('[Content_Types].xml')) &&
-      file.includes(Buffer.from('word/'))
+      bytes.toString('ascii', 0, 5) === '%PDF-' &&
+      !/\/(JavaScript|JS|OpenAction|AA|Launch|EmbeddedFile|RichMedia)\b/i.test(
+        content,
+      ) &&
+      !/\/S\s*\/JavaScript\b/i.test(content)
     );
   }
 
@@ -474,9 +552,6 @@ function hasValidDocumentSignature(path: string, mimeType: string) {
 function safeDocumentExtension(mimeType: string) {
   const extensionByMime: Record<string, string> = {
     'application/pdf': '.pdf',
-    'application/msword': '.doc',
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
-      '.docx',
     'image/jpeg': '.jpg',
     'image/png': '.png',
     'image/webp': '.webp',
@@ -506,7 +581,6 @@ function safeDisplayFileName(originalName: string) {
 
 function mimeTypeFromFileName(fileName: string) {
   const mimeTypes: Record<string, string> = {
-    '.doc': 'application/msword',
     '.docx':
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     '.jpeg': 'image/jpeg',

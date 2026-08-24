@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -9,7 +10,7 @@ import {
   OrganizationStatus,
   Prisma,
 } from '@prisma/client';
-import { createReadStream, existsSync } from 'fs';
+import { createReadStream, existsSync, statSync, unlinkSync } from 'fs';
 import { basename, resolve, sep } from 'path';
 import type { Response } from 'express';
 import {
@@ -33,6 +34,20 @@ import type {
   UpdateDocumentDto,
   UpdateDocumentFolderDto,
 } from './dto/update-document.dto';
+
+const MAX_ZIP_BYTES = 512 * 1024 * 1024;
+const MAX_ZIP_DOCUMENTS = 500;
+const MAX_CONCURRENT_ZIP_EXPORTS = 2;
+const activeZipTenants = new Set<string>();
+const activeZipUsers = new Set<string>();
+
+type ZipFilters = {
+  companyId?: string;
+  employeeId?: string;
+  folderId?: string;
+  status?: string;
+  type?: string;
+};
 
 @Injectable()
 export class DocumentsService {
@@ -459,6 +474,15 @@ export class DocumentsService {
           ? DocumentStatus.PENDING_SIGNATURE
           : DocumentStatus.DRAFT),
     );
+    const fileUrl = this.toOptionalString(createDocumentDto.fileUrl);
+
+    if (status === DocumentStatus.SIGNED) {
+      throw new BadRequestException(
+        'El estado firmado solo se obtiene mediante el flujo de firma.',
+      );
+    }
+
+    await this.assertDocumentFileBinding(actor, fileUrl);
 
     const employees = await this.prisma.employee.findMany({
       where: { id: { in: employeeIds } },
@@ -504,7 +528,7 @@ export class DocumentsService {
             status,
             title,
             folder: normalizedFolder,
-            fileUrl: this.toOptionalString(createDocumentDto.fileUrl),
+            fileUrl,
             fileName: this.toOptionalString(createDocumentDto.fileName),
             mimeType: this.toOptionalString(createDocumentDto.mimeType),
             fileSize: this.normalizeOptionalPositiveInt(
@@ -568,6 +592,30 @@ export class DocumentsService {
 
     assertCompanyAccess(actor, document.company.id);
 
+    if (document.status === DocumentStatus.SIGNED) {
+      throw new BadRequestException(
+        'Un documento firmado es inmutable. Crea una nueva version para corregirlo.',
+      );
+    }
+
+    const requestedStatus =
+      updateDocumentDto.status !== undefined
+        ? this.normalizeDocumentStatus(updateDocumentDto.status)
+        : undefined;
+    if (requestedStatus === DocumentStatus.SIGNED) {
+      throw new BadRequestException(
+        'El estado firmado solo se obtiene mediante el flujo de firma.',
+      );
+    }
+
+    const requestedFileUrl =
+      updateDocumentDto.fileUrl !== undefined
+        ? this.toOptionalString(updateDocumentDto.fileUrl)
+        : undefined;
+    if (requestedFileUrl !== undefined) {
+      await this.assertDocumentFileBinding(actor, requestedFileUrl);
+    }
+
     let targetEmployee: {
       id: string;
       tenantId: string;
@@ -604,8 +652,13 @@ export class DocumentsService {
       assertCompanyAccess(actor, targetEmployee.companyId);
     }
 
-    const updatedDocument = await this.prisma.employeeDocument.update({
-      where: { id: document.id },
+    const transition = await this.prisma.employeeDocument.updateMany({
+      where: {
+        id: document.id,
+        tenantId,
+        status: { not: DocumentStatus.SIGNED },
+        updatedAt: document.updatedAt,
+      },
       data: {
         ...(targetEmployee
           ? {
@@ -616,9 +669,7 @@ export class DocumentsService {
         ...(updateDocumentDto.type !== undefined
           ? { type: this.normalizeDocumentType(updateDocumentDto.type) }
           : {}),
-        ...(updateDocumentDto.status !== undefined
-          ? { status: this.normalizeDocumentStatus(updateDocumentDto.status) }
-          : {}),
+        ...(requestedStatus !== undefined ? { status: requestedStatus } : {}),
         ...(title ? { title } : {}),
         ...(updateDocumentDto.folder !== undefined
           ? {
@@ -629,8 +680,8 @@ export class DocumentsService {
         ...(updateDocumentDto.folderId !== undefined
           ? { folderId: folder?.id ?? null }
           : {}),
-        ...(updateDocumentDto.fileUrl !== undefined
-          ? { fileUrl: this.toOptionalString(updateDocumentDto.fileUrl) }
+        ...(requestedFileUrl !== undefined
+          ? { fileUrl: requestedFileUrl }
           : {}),
         ...(updateDocumentDto.fileName !== undefined
           ? { fileName: this.toOptionalString(updateDocumentDto.fileName) }
@@ -661,8 +712,19 @@ export class DocumentsService {
           ? { expiresAt: this.parseOptionalDate(updateDocumentDto.expiresAt) }
           : {}),
       },
-      select: this.documentSelect(),
     });
+
+    if (transition.count !== 1) {
+      throw new ConflictException(
+        'El documento cambio mientras se procesaba la edicion. Recarga e intenta nuevamente.',
+      );
+    }
+
+    const updatedDocument =
+      await this.prisma.employeeDocument.findUniqueOrThrow({
+        where: { id: document.id },
+        select: this.documentSelect(),
+      });
 
     await this.auditService.write({
       tenantId,
@@ -676,6 +738,14 @@ export class DocumentsService {
       before: this.toJson(this.auditDocumentSnapshot(document)),
       after: this.toJson(this.auditDocumentSnapshot(updatedDocument)),
     });
+
+    if (
+      requestedFileUrl !== undefined &&
+      document.fileUrl &&
+      document.fileUrl !== requestedFileUrl
+    ) {
+      await this.deleteUnreferencedLocalFile(document.fileUrl);
+    }
 
     return updatedDocument;
   }
@@ -699,8 +769,28 @@ export class DocumentsService {
 
     assertCompanyAccess(actor, document.company.id);
 
-    await this.prisma.$transaction([
-      this.prisma.notification.deleteMany({
+    if (document.status === DocumentStatus.SIGNED) {
+      throw new BadRequestException(
+        'Un documento firmado no se puede eliminar. Conserva la evidencia y crea una nueva version.',
+      );
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      const deleted = await tx.employeeDocument.deleteMany({
+        where: {
+          id: document.id,
+          tenantId,
+          status: { not: DocumentStatus.SIGNED },
+          updatedAt: document.updatedAt,
+        },
+      });
+      if (deleted.count !== 1) {
+        throw new ConflictException(
+          'El documento cambio mientras se procesaba la eliminacion. Recarga e intenta nuevamente.',
+        );
+      }
+
+      await tx.notification.deleteMany({
         where: {
           tenantId,
           OR: [
@@ -716,9 +806,8 @@ export class DocumentsService {
             },
           ],
         },
-      }),
-      this.prisma.employeeDocument.delete({ where: { id: document.id } }),
-    ]);
+      });
+    });
 
     await this.auditService.write({
       tenantId,
@@ -732,19 +821,37 @@ export class DocumentsService {
       before: this.toJson(this.auditDocumentSnapshot(document)),
     });
 
+    await this.deleteUnreferencedLocalFile(document.fileUrl);
+
     return { id: document.id, deleted: true };
   }
 
-  async exportZip(
+  async exportZip(actor: AuthUser, response: Response, filters?: ZipFilters) {
+    const userKey = `${actor.tenantId}:${actor.sub}`;
+    if (
+      activeZipUsers.has(userKey) ||
+      activeZipTenants.has(actor.tenantId) ||
+      activeZipUsers.size >= MAX_CONCURRENT_ZIP_EXPORTS
+    ) {
+      throw new ConflictException(
+        'Ya hay una exportacion ZIP en proceso. Espera a que termine antes de iniciar otra.',
+      );
+    }
+
+    activeZipUsers.add(userKey);
+    activeZipTenants.add(actor.tenantId);
+    try {
+      return await this.exportZipArchive(actor, response, filters);
+    } finally {
+      activeZipUsers.delete(userKey);
+      activeZipTenants.delete(actor.tenantId);
+    }
+  }
+
+  private async exportZipArchive(
     actor: AuthUser,
     response: Response,
-    filters?: {
-      companyId?: string;
-      employeeId?: string;
-      folderId?: string;
-      status?: string;
-      type?: string;
-    },
+    filters?: ZipFilters,
   ) {
     const tenantId = actor.tenantId;
     const where: Prisma.EmployeeDocumentWhereInput = {
@@ -783,7 +890,7 @@ export class DocumentsService {
         { employee: { lastName: 'asc' } },
         { createdAt: 'desc' },
       ],
-      take: 5000,
+      take: MAX_ZIP_DOCUMENTS + 1,
       select: {
         id: true,
         title: true,
@@ -802,6 +909,27 @@ export class DocumentsService {
       },
     });
 
+    if (documents.length > MAX_ZIP_DOCUMENTS) {
+      throw new BadRequestException(
+        `La exportacion supera ${MAX_ZIP_DOCUMENTS} documentos. Aplica filtros mas especificos.`,
+      );
+    }
+
+    const localDocuments = documents.flatMap((document) => {
+      const filePath = resolveLocalDocumentUploadPath(document.fileUrl);
+      if (!filePath || !existsSync(filePath)) return [];
+      return [{ document, filePath, size: statSync(filePath).size }];
+    });
+    const totalBytes = localDocuments.reduce(
+      (total, item) => total + item.size,
+      0,
+    );
+    if (totalBytes > MAX_ZIP_BYTES) {
+      throw new BadRequestException(
+        'La exportacion supera 512 MB. Aplica filtros mas especificos.',
+      );
+    }
+
     response.setHeader('Content-Type', 'application/zip');
     response.setHeader(
       'Content-Disposition',
@@ -809,26 +937,24 @@ export class DocumentsService {
     );
 
     const { ZipArchive } = await import('archiver');
-    const archive = new ZipArchive({ zlib: { level: 9 } });
-    archive.on('error', (error) => {
-      throw error;
+    const archive = new ZipArchive({ zlib: { level: 6 } });
+    const archiveError = new Promise<never>((_resolve, reject) => {
+      archive.once('error', (error) => {
+        response.destroy(error);
+        reject(error);
+      });
     });
     archive.pipe(response);
 
     const manifest: Array<Record<string, string | null>> = [];
 
-    for (const document of documents) {
-      const filePath = resolveLocalDocumentUploadPath(document.fileUrl);
-      if (!filePath || !existsSync(filePath)) {
-        continue;
-      }
-
+    for (const { document, filePath } of localDocuments) {
       const employeeFolder = this.safeArchiveSegment(
         `${document.employee.firstName} ${document.employee.lastName}`,
       );
       const folder = this.safeArchiveSegment(document.folder || 'General');
       const extension = this.extensionFromFileName(
-        document.fileName ?? document.fileUrl ?? document.title,
+        document.fileUrl ?? document.fileName ?? document.title,
       );
       const fileName = `${this.safeArchiveSegment(document.title)}-${document.id.slice(0, 8)}${extension}`;
 
@@ -849,7 +975,7 @@ export class DocumentsService {
       name: 'manifest.json',
     });
 
-    await archive.finalize();
+    await Promise.race([archive.finalize(), archiveError]);
 
     await this.auditService.write({
       tenantId,
@@ -878,6 +1004,8 @@ export class DocumentsService {
       signedByName: true,
       signedByEmail: true,
       signatureText: true,
+      signatureHash: true,
+      signedContentHash: true,
       visibleToEmployee: true,
       requiresSignature: true,
       fileName: true,
@@ -894,6 +1022,7 @@ export class DocumentsService {
         },
       },
       createdAt: true,
+      updatedAt: true,
       employee: {
         select: {
           id: true,
@@ -927,6 +1056,8 @@ export class DocumentsService {
       signedByName: true,
       signedByEmail: true,
       signatureText: true,
+      signatureHash: true,
+      signedContentHash: true,
       visibleToEmployee: true,
       requiresSignature: true,
       fileName: true,
@@ -943,6 +1074,7 @@ export class DocumentsService {
         },
       },
       createdAt: true,
+      updatedAt: true,
       employee: {
         select: {
           id: true,
@@ -1300,7 +1432,11 @@ export class DocumentsService {
   private extensionFromFileName(value: string) {
     const name = basename(value);
     const match = name.match(/\.[a-zA-Z0-9]{2,8}$/);
-    return match ? match[0].toLowerCase() : '.pdf';
+    const extension = match?.[0].toLowerCase();
+    return extension &&
+      ['.pdf', '.docx', '.jpg', '.jpeg', '.png', '.webp'].includes(extension)
+      ? extension
+      : '.bin';
   }
 
   private normalizeOptionalDocumentType(value: unknown) {
@@ -1413,6 +1549,50 @@ export class DocumentsService {
 
     return normalized.length > 0 ? normalized : null;
   }
+
+  private async assertDocumentFileBinding(
+    actor: AuthUser,
+    fileUrl: string | null,
+  ) {
+    if (!fileUrl) return;
+
+    const expectedPrefix = `/uploads/documentos/${actor.tenantId}--${actor.sub}--`;
+    const uploadedName = fileUrl.slice('/uploads/documentos/'.length);
+    if (
+      fileUrl.startsWith(expectedPrefix) &&
+      basename(uploadedName) === uploadedName &&
+      /^[A-Za-z0-9._-]{1,220}$/.test(uploadedName)
+    ) {
+      return;
+    }
+
+    const legacyOwner = await this.prisma.employeeDocument.findFirst({
+      where: { fileUrl, tenantId: actor.tenantId },
+      select: { companyId: true, id: true },
+    });
+
+    if (!legacyOwner) {
+      throw new BadRequestException(
+        'El archivo documental no pertenece a este espacio de trabajo.',
+      );
+    }
+
+    assertCompanyAccess(actor, legacyOwner.companyId);
+  }
+
+  private async deleteUnreferencedLocalFile(fileUrl: string | null) {
+    if (!fileUrl) return;
+
+    const references = await this.prisma.employeeDocument.count({
+      where: { fileUrl },
+    });
+    if (references > 0) return;
+
+    const filePath = resolveLocalDocumentUploadPath(fileUrl);
+    if (filePath && existsSync(filePath)) {
+      unlinkSync(filePath);
+    }
+  }
 }
 
 export function resolveLocalDocumentUploadPath(
@@ -1424,8 +1604,18 @@ export function resolveLocalDocumentUploadPath(
     return null;
   }
 
-  const relative = normalizedUrl.replace(/^\/uploads\//, '');
-  const root = resolve(workingDirectory, 'uploads');
+  const relative = normalizedUrl.slice('/uploads/documentos/'.length);
+  if (
+    !relative ||
+    basename(relative) !== relative ||
+    relative.includes('..') ||
+    relative.includes('/') ||
+    relative.includes('\\')
+  ) {
+    return null;
+  }
+
+  const root = resolve(workingDirectory, 'uploads', 'documentos');
   const absolutePath = resolve(root, relative);
 
   return absolutePath.startsWith(`${root}${sep}`) ? absolutePath : null;

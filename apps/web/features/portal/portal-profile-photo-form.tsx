@@ -32,9 +32,9 @@ export function PortalProfilePhotoForm({ employee }: { employee: PortalEmployee 
       return;
     }
 
-    if (file.size > 50 * 1024 * 1024) {
+    if (file.size > 5 * 1024 * 1024) {
       setState("error");
-      setMessage("La foto debe pesar maximo 50 MB.");
+      setMessage("La foto debe pesar maximo 5 MB.");
       return;
     }
 
@@ -43,7 +43,6 @@ export function PortalProfilePhotoForm({ employee }: { employee: PortalEmployee 
 
     try {
       const uploaded = await uploadPortalProfileImage(file);
-      await updatePortalProfilePhoto(uploaded.url);
       setAvatarUrl(uploaded.url);
       setState("success");
       setMessage("Foto actualizada.");

@@ -192,6 +192,17 @@ export class BenefitsService {
       updateBenefitDto.companyIds !== undefined ||
       updateBenefitDto.teamIds !== undefined;
 
+    await this.assertScopedAudience(
+      actor,
+      current.audienceScope,
+      current.audiences.flatMap((audience) =>
+        audience.company ? [audience.company.id] : [],
+      ),
+      current.audiences.flatMap((audience) =>
+        audience.team ? [audience.team.id] : [],
+      ),
+    );
+
     if (shouldReplaceAudience) {
       await this.assertAudience(tenantId, audienceScope, companyIds, teamIds);
       await this.assertScopedAudience(

@@ -2,6 +2,7 @@ import { INestApplication } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types';
+import * as bcrypt from 'bcryptjs';
 import { AppModule } from './../src/app.module';
 import { SecurityValidationPipe } from './../src/security/security-validation.pipe';
 import { ExportJobsService } from './../src/modules/export-jobs/export-jobs.service';
@@ -58,10 +59,11 @@ type EmployeeProfileBody = {
   employee: { company: { id: string }; id: string };
   timelineEvents: Array<{ title: string; type: string }>;
 };
-type PortalProfileBody = { employee: unknown };
+type PortalProfileBody = { employee: { id: string } };
 type RoleBody = { id: string; name: string };
 type UsersRolesBody = RoleBody[];
 type EmployeesPageBody = { data: EmployeeBody[] };
+type IdBody = { id: string };
 
 describe('Accesos y seguridad basica (e2e)', () => {
   let app: INestApplication<App>;
@@ -70,6 +72,7 @@ describe('Accesos y seguridad basica (e2e)', () => {
   let moodHrToken: string;
   let moodCompanyId: string;
   let infinityCompanyId: string;
+  let rrhhRoleId: string;
   let superAdminRoleId: string;
   let exportJobsService: ExportJobsService;
   let prisma: PrismaService;
@@ -113,7 +116,17 @@ describe('Accesos y seguridad basica (e2e)', () => {
     expect(superAdminRole?.id).toEqual(expect.any(String));
     expect(moodCompanyId).toEqual(expect.any(String));
     expect(infinityCompanyId).toEqual(expect.any(String));
+    await prisma.employee.updateMany({
+      where: { companyId: moodCompanyId, documentNumber: '70000002' },
+      data: {
+        attendancePinHash: await bcrypt.hash('839274', 10),
+        attendancePinChangeRequired: false,
+        attendancePinFailedAttempts: 0,
+        attendancePinLockedUntil: null,
+      },
+    });
     superAdminRoleId = String(superAdminRole?.id);
+    rrhhRoleId = String(rrhhRole?.id);
 
     const hrEmail = `rrhh-mood-${Date.now()}@spulso.local`;
     await request(app.getHttpServer())
@@ -202,6 +215,97 @@ describe('Accesos y seguridad basica (e2e)', () => {
       .get('/trabajadores')
       .set('Authorization', `Bearer ${workerToken}`)
       .expect(403);
+
+    for (const path of [
+      '/beneficios',
+      '/comunicados',
+      '/documentos',
+      '/documentos/exportar/zip',
+      '/notificaciones',
+    ]) {
+      await request(app.getHttpServer())
+        .get(path)
+        .set('Authorization', `Bearer ${workerToken}`)
+        .expect(403);
+    }
+
+    await request(app.getHttpServer())
+      .post('/solicitudes')
+      .set('Authorization', `Bearer ${workerToken}`)
+      .send({})
+      .expect(403);
+  });
+
+  it('reserva el estado firmado al flujo de firma y vuelve inmutable la evidencia', async () => {
+    const profile = await request(app.getHttpServer())
+      .get('/portal/perfil')
+      .set('Authorization', `Bearer ${workerToken}`)
+      .expect(200);
+    const employeeId = (profile.body as PortalProfileBody).employee.id;
+
+    await request(app.getHttpServer())
+      .post('/documentos')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ employeeId, status: 'SIGNED', title: 'Firma fabricada' })
+      .expect(400);
+
+    const uploaded = await request(app.getHttpServer())
+      .post('/archivos/documentos')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .attach('file', Buffer.from('%PDF-1.4\nSPulso\n%%EOF'), {
+        contentType: 'application/pdf',
+        filename: 'evidencia.pdf',
+      })
+      .expect(201);
+    const uploadedBody = uploaded.body as { url: string };
+    expect(uploadedBody.url).toContain('/uploads/documentos/');
+
+    const created = await request(app.getHttpServer())
+      .post('/documentos')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        employeeId,
+        fileName: 'evidencia.pdf',
+        fileUrl: uploadedBody.url,
+        mimeType: 'application/pdf',
+        requiresSignature: true,
+        status: 'PENDING_SIGNATURE',
+        title: `Evidencia firmable ${Date.now()}`,
+      })
+      .expect(201);
+    const createdBody = created.body as IdBody;
+
+    const signed = await request(app.getHttpServer())
+      .patch(`/portal/documentos/${createdBody.id}/firmar`)
+      .set('Authorization', `Bearer ${workerToken}`)
+      .send({ signatureText: 'Acepto el documento' })
+      .expect(200);
+    const signedBody = signed.body as {
+      signedContentHash: string;
+      status: string;
+    };
+    expect(signedBody.status).toBe('SIGNED');
+    expect(signedBody.signedContentHash).toMatch(/^[a-f0-9]{64}$/);
+
+    await request(app.getHttpServer())
+      .patch(`/documentos/${createdBody.id}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ title: 'Alteracion posterior' })
+      .expect(400);
+    await request(app.getHttpServer())
+      .delete(`/documentos/${createdBody.id}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .post('/documentos')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        employeeId,
+        fileUrl: '/uploads/documentos/otro-tenant--archivo.pdf',
+        title: 'Archivo sin pertenencia',
+      })
+      .expect(400);
   });
 
   it('permite al administrador entrar a modulos protegidos', async () => {
@@ -257,6 +361,83 @@ describe('Accesos y seguridad basica (e2e)', () => {
       .expect(403);
   });
 
+  it('bloquea mutaciones cruzadas de trabajadores, organizacion y audiencias', async () => {
+    const infinityEmployees = await request(app.getHttpServer())
+      .get(`/trabajadores?companyId=${infinityCompanyId}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(200);
+    const infinityEmployee = (infinityEmployees.body as EmployeesPageBody)
+      .data[0];
+
+    expect(infinityEmployee?.id).toEqual(expect.any(String));
+
+    await request(app.getHttpServer())
+      .patch(`/trabajadores/${infinityEmployee.id}`)
+      .set('Authorization', `Bearer ${moodHrToken}`)
+      .send({ firstName: 'Cambio ilegal' })
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .post('/organizacion/areas')
+      .set('Authorization', `Bearer ${moodHrToken}`)
+      .send({ companyId: infinityCompanyId, name: 'Area fuera de alcance' })
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .post('/organizacion/cargos')
+      .set('Authorization', `Bearer ${moodHrToken}`)
+      .send({ name: 'Cargo global ilegal', scope: 'GROUP' })
+      .expect(400);
+
+    const announcement = await request(app.getHttpServer())
+      .post('/comunicados')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        audienceScope: 'ALL',
+        message: 'Comunicado global de prueba de autorizacion.',
+        title: `Comunicado global ${Date.now()}`,
+      })
+      .expect(201);
+    const announcementBody = announcement.body as IdBody;
+
+    await request(app.getHttpServer())
+      .patch(`/comunicados/${announcementBody.id}`)
+      .set('Authorization', `Bearer ${moodHrToken}`)
+      .send({ title: 'Cambio ilegal' })
+      .expect(400);
+
+    const benefit = await request(app.getHttpServer())
+      .post('/beneficios')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        audienceScope: 'ALL',
+        category: 'Seguridad',
+        description: 'Beneficio global de prueba de autorizacion.',
+        title: `Beneficio global ${Date.now()}`,
+      })
+      .expect(201);
+    const benefitBody = benefit.body as IdBody;
+
+    await request(app.getHttpServer())
+      .patch(`/beneficios/${benefitBody.id}`)
+      .set('Authorization', `Bearer ${moodHrToken}`)
+      .send({ title: 'Cambio ilegal' })
+      .expect(400);
+
+    const rules = await request(app.getHttpServer())
+      .get('/automatizaciones')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(200);
+    const rule = (rules.body as IdBody[])[0];
+
+    expect(rule?.id).toEqual(expect.any(String));
+    await request(app.getHttpServer())
+      .patch(`/automatizaciones/${rule.id}`)
+      .set('Authorization', `Bearer ${moodHrToken}`)
+      .send({ enabled: false })
+      .expect(403);
+  });
+
   it('impide que un administrador de empresa escale roles o privilegios globales', async () => {
     const roleName = `Gestor local ${Date.now()}`;
     const roleResponse = await request(app.getHttpServer())
@@ -302,6 +483,20 @@ describe('Accesos y seguridad basica (e2e)', () => {
         lastName: 'Ilegal',
         password: 'Global1234.',
         roleId: superAdminRoleId,
+      })
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .post('/usuarios')
+      .set('Authorization', `Bearer ${localToken}`)
+      .send({
+        accessMode: 'admin',
+        companyId: moodCompanyId,
+        email: `rrhh-escalado-${Date.now()}@spulso.local`,
+        firstName: 'RRHH',
+        lastName: 'Escalado',
+        password: 'Escalado1234.',
+        roleId: rrhhRoleId,
       })
       .expect(403);
   });
@@ -434,7 +629,7 @@ describe('Accesos y seguridad basica (e2e)', () => {
         tenantSlug: 'grupo-sp',
         companySlug: 'mood',
         identifier: '70000002',
-        pin: '1234',
+        pin: '839274',
         action: 'CHECK_IN',
       })
       .expect(400)
@@ -450,7 +645,7 @@ describe('Accesos y seguridad basica (e2e)', () => {
         tenantSlug: 'grupo-sp',
         companySlug: 'mood',
         identifier: '70000002',
-        currentPin: '1234',
+        currentPin: '839274',
         newPin: '9876',
       })
       .expect(400);
@@ -472,7 +667,7 @@ describe('Accesos y seguridad basica (e2e)', () => {
           tenantSlug: 'grupo-sp',
           companySlug: 'mood',
           identifier: '70000002',
-          pin: '1234',
+          pin: '839274',
           action: 'CHECK_IN',
           latitude: -16.409,
           longitude: -71.5375,
@@ -489,12 +684,107 @@ describe('Accesos y seguridad basica (e2e)', () => {
     }
   });
 
+  it('bloquea temporalmente un PIN tras intentos fallidos distribuidos', async () => {
+    const employee = await prisma.employee.findFirstOrThrow({
+      where: { companyId: moodCompanyId, documentNumber: '70000002' },
+      select: { id: true },
+    });
+
+    try {
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        await request(app.getHttpServer())
+          .post('/asistencia/marcacion-personal')
+          .send({
+            action: 'CHECK_IN',
+            companySlug: 'mood',
+            identifier: '70000002',
+            latitude: -12.0464,
+            longitude: -77.0428,
+            pin: '000001',
+            tenantSlug: 'grupo-sp',
+          })
+          .expect(400);
+      }
+
+      await request(app.getHttpServer())
+        .post('/asistencia/marcacion-personal')
+        .send({
+          action: 'CHECK_IN',
+          companySlug: 'mood',
+          identifier: '70000002',
+          latitude: -12.0464,
+          longitude: -77.0428,
+          pin: '839274',
+          tenantSlug: 'grupo-sp',
+        })
+        .expect(400);
+
+      const locked = await prisma.employee.findUniqueOrThrow({
+        where: { id: employee.id },
+        select: { attendancePinLockedUntil: true },
+      });
+      expect(locked.attendancePinLockedUntil?.getTime()).toBeGreaterThan(
+        Date.now(),
+      );
+    } finally {
+      await prisma.employee.update({
+        where: { id: employee.id },
+        data: {
+          attendancePinFailedAttempts: 0,
+          attendancePinLockedUntil: null,
+        },
+      });
+    }
+  });
+
+  it('serializa intentos concurrentes de PIN antes de validar bcrypt', async () => {
+    const employee = await prisma.employee.findFirstOrThrow({
+      where: { companyId: moodCompanyId, documentNumber: '70000002' },
+      select: { id: true },
+    });
+
+    try {
+      const attempts = await Promise.all(
+        Array.from({ length: 12 }, (_item, index) =>
+          request(app.getHttpServer())
+            .post('/asistencia/marcacion-personal')
+            .send({
+              action: 'CHECK_IN',
+              companySlug: 'mood',
+              identifier: '70000002',
+              latitude: -12.0464,
+              longitude: -77.0428,
+              pin: String(100_000 + index),
+              tenantSlug: 'grupo-sp',
+            }),
+        ),
+      );
+      expect(attempts.every((response) => response.status === 400)).toBe(true);
+
+      const locked = await prisma.employee.findUniqueOrThrow({
+        where: { id: employee.id },
+        select: { attendancePinLockedUntil: true },
+      });
+      expect(locked.attendancePinLockedUntil?.getTime()).toBeGreaterThan(
+        Date.now(),
+      );
+    } finally {
+      await prisma.employee.update({
+        where: { id: employee.id },
+        data: {
+          attendancePinFailedAttempts: 0,
+          attendancePinLockedUntil: null,
+        },
+      });
+    }
+  });
+
   it('exige empresa en marcacion personal publica', async () => {
     await request(app.getHttpServer())
       .post('/asistencia/marcacion-personal')
       .send({
         identifier: '70000002',
-        pin: '1234',
+        pin: '839274',
         action: 'CHECK_IN',
       })
       .expect(400)
@@ -588,12 +878,28 @@ describe('Accesos y seguridad basica (e2e)', () => {
     const first = await request(app.getHttpServer())
       .post('/exportaciones')
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ filters: { status: 'ACTIVE' }, type: 'EMPLOYEES' })
+      .send({
+        filters: { search: 'reclamo-primero', status: 'ACTIVE' },
+        type: 'EMPLOYEES',
+      })
       .expect(201);
+
+    await request(app.getHttpServer())
+      .post('/exportaciones')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        filters: { search: 'reclamo-primero', status: 'ACTIVE' },
+        type: 'EMPLOYEES',
+      })
+      .expect(400);
+
     const second = await request(app.getHttpServer())
       .post('/exportaciones')
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ filters: { status: 'ACTIVE' }, type: 'EMPLOYEES' })
+      .send({
+        filters: { search: 'reclamo-segundo', status: 'ACTIVE' },
+        type: 'EMPLOYEES',
+      })
       .expect(201);
     const firstBody = first.body as ExportJobBody;
     const secondBody = second.body as ExportJobBody;
@@ -624,7 +930,10 @@ describe('Accesos y seguridad basica (e2e)', () => {
     const created = await request(app.getHttpServer())
       .post('/exportaciones')
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ filters: { status: 'ACTIVE' }, type: 'EMPLOYEES' })
+      .send({
+        filters: { search: 'retencion-vencida', status: 'ACTIVE' },
+        type: 'EMPLOYEES',
+      })
       .expect(201);
     const createdBody = created.body as ExportJobBody;
     const completed = await waitForExportJob(createdBody.id);
@@ -643,5 +952,32 @@ describe('Accesos y seguridad basica (e2e)', () => {
       .get(`/exportaciones/${createdBody.id}/descargar`)
       .set('Authorization', `Bearer ${adminToken}`)
       .expect(404);
+  });
+
+  it('revoca el token en logout y no solo borra la cookie del navegador', async () => {
+    const email = `sesion-revocable-${Date.now()}@spulso.local`;
+    await request(app.getHttpServer())
+      .post('/usuarios')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        accessMode: 'admin',
+        companyId: moodCompanyId,
+        email,
+        firstName: 'Sesion',
+        lastName: 'Revocable',
+        password: 'Sesion1234.',
+        roleId: rrhhRoleId,
+      })
+      .expect(201);
+    const token = await login(email, 'Sesion1234.');
+
+    await request(app.getHttpServer())
+      .post('/auth/logout')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(201);
+    await request(app.getHttpServer())
+      .get('/auth/me')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(401);
   });
 });

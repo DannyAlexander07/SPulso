@@ -28,9 +28,10 @@ export type IdentityLookupResult =
       tipo: "RUC";
     };
 
-export async function lookupIdentityDocument(documentNumber: string) {
+export async function lookupIdentityDocument(documentNumber: string, companyId: string) {
   const normalized = documentNumber.trim();
-  const response = await fetch(`${getApiUrl()}/consultas/documentos/${encodeURIComponent(normalized)}`, {
+  const query = new URLSearchParams({ companyId });
+  const response = await fetch(`${getApiUrl()}/consultas/documentos/${encodeURIComponent(normalized)}?${query}`, {
     headers: clientAuthHeaders(),
   });
 

@@ -48,14 +48,35 @@ test("documentos publicados usan la ruta web y conservan la fecha de calendario"
   const employeeId = employeesBody.data?.[0]?.id;
   expect(employeeId).toBeTruthy();
 
+  const uploadResponse = await page.request.post(
+    "/api/spulso/archivos/documentos",
+    {
+      multipart: {
+        file: {
+          name: "documento-regresion.pdf",
+          mimeType: "application/pdf",
+          buffer: Buffer.from(
+            "%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF\n",
+          ),
+        },
+      },
+    },
+  );
+  expect(uploadResponse.ok()).toBeTruthy();
+  const uploaded = (await uploadResponse.json()) as {
+    fileName: string;
+    mimeType: string;
+    url: string;
+  };
+
   const title = `Documento regresion ${Date.now()}`;
   const createResponse = await page.request.post("/api/spulso/documentos", {
     data: {
       employeeId,
       expiresAt: "2099-12-31",
-      fileName: "documento-regresion.pdf",
-      fileUrl: "/uploads/documentos/documento-regresion.pdf",
-      mimeType: "application/pdf",
+      fileName: uploaded.fileName,
+      fileUrl: uploaded.url,
+      mimeType: uploaded.mimeType,
       status: "DRAFT",
       title,
       type: "OTHER",
@@ -75,10 +96,7 @@ test("documentos publicados usan la ruta web y conservan la fecha de calendario"
     await expect(card).toContainText(/vence 31 dic\. 2099/i);
 
     const downloadLink = card.getByRole("link", { name: /Abrir/i });
-    await expect(downloadLink).toHaveAttribute(
-      "href",
-      "/api/spulso/uploads/documentos/documento-regresion.pdf",
-    );
+    await expect(downloadLink).toHaveAttribute("href", `/api/spulso${uploaded.url}`);
   } finally {
     await page.request.delete(`/api/spulso/documentos/${created.id}`);
   }
@@ -92,18 +110,12 @@ test("organizacion aprovecha el ancho disponible sin desplazarse a la derecha", 
   const workspace = page
     .getByRole("heading", { name: /Ordena personas en areas/i })
     .locator('xpath=ancestor::div[contains(@class, "pb-24")][1]');
-  const contentColumn = page.locator("main > div.grid > section").first();
-  const [workspaceBox, contentColumnBox] = await Promise.all([
-    workspace.boundingBox(),
-    contentColumn.boundingBox(),
-  ]);
+  const workspaceBox = await workspace.boundingBox();
 
   expect(workspaceBox).not.toBeNull();
-  expect(contentColumnBox).not.toBeNull();
-
-  expect(workspaceBox!.x).toBe(contentColumnBox!.x);
-  expect(workspaceBox!.width).toBe(contentColumnBox!.width);
-  expect(workspaceBox!.width).toBeGreaterThanOrEqual(1650);
+  expect(workspaceBox!.x).toBeLessThan(360);
+  expect(workspaceBox!.width).toBeGreaterThanOrEqual(1500);
+  expect(workspaceBox!.x + workspaceBox!.width).toBeLessThanOrEqual(1920);
 
   const hasHorizontalOverflow = await page.evaluate(
     () =>

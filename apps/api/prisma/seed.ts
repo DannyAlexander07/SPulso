@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { randomInt } from 'node:crypto';
 import { PrismaPg } from '@prisma/adapter-pg';
 import * as bcrypt from 'bcryptjs';
 import {
@@ -31,7 +32,10 @@ function startOfToday() {
 }
 
 async function main() {
-  if (process.env.NODE_ENV === 'production' && process.env.ALLOW_DEMO_SEED !== 'true') {
+  if (
+    process.env.NODE_ENV === 'production' &&
+    process.env.ALLOW_DEMO_SEED !== 'true'
+  ) {
     throw new Error(
       'El seed demo esta bloqueado en produccion. Usa migraciones y procesos de alta controlados.',
     );
@@ -198,7 +202,7 @@ async function main() {
     },
   ];
 
-  const attendancePinHash = await bcrypt.hash('1234', 10);
+  const issuedPins = new Set<string>();
 
   for (const employee of employees) {
     const companyId = companyBySlug.get(employee.companySlug);
@@ -206,6 +210,13 @@ async function main() {
     if (!companyId) {
       continue;
     }
+
+    let initialAttendancePin = '';
+    do {
+      initialAttendancePin = String(randomInt(100_000, 1_000_000));
+    } while (issuedPins.has(initialAttendancePin));
+    issuedPins.add(initialAttendancePin);
+    const attendancePinHash = await bcrypt.hash(initialAttendancePin, 10);
 
     await prisma.employee.upsert({
       where: {
@@ -216,8 +227,6 @@ async function main() {
       },
       update: {
         documentNumber: employee.documentNumber,
-        attendancePinHash,
-        attendancePinChangeRequired: false,
         firstName: employee.firstName,
         lastName: employee.lastName,
         jobTitle: employee.jobTitle,
@@ -229,7 +238,7 @@ async function main() {
         documentNumber: employee.documentNumber,
         employeeCode: employee.employeeCode,
         attendancePinHash,
-        attendancePinChangeRequired: false,
+        attendancePinChangeRequired: true,
         firstName: employee.firstName,
         lastName: employee.lastName,
         jobTitle: employee.jobTitle,

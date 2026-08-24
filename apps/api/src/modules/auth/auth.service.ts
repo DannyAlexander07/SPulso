@@ -23,6 +23,7 @@ type AuthTokenPayload = {
   roleId: string | null;
   roleName?: string | null;
   permissions?: string[];
+  sessionVersion: number;
 };
 
 @Injectable()
@@ -57,6 +58,7 @@ export class AuthService {
         lastName: true,
         avatarUrl: true,
         status: true,
+        sessionVersion: true,
         themePreference: true,
       },
     });
@@ -81,6 +83,7 @@ export class AuthService {
         roleId: user.roleId,
         roleName: role?.name ?? null,
         permissions: role?.permissions ?? [],
+        sessionVersion: user.sessionVersion,
       },
       this.getJwtSecret(),
       getJwtSignOptions(),
@@ -106,11 +109,16 @@ export class AuthService {
         lastName: true,
         avatarUrl: true,
         status: true,
+        sessionVersion: true,
         themePreference: true,
       },
     });
 
-    if (!user || user.status !== 'ACTIVE') {
+    if (
+      !user ||
+      user.status !== 'ACTIVE' ||
+      payload.sessionVersion !== user.sessionVersion
+    ) {
       throw new UnauthorizedException('Sesión no valida.');
     }
 
@@ -118,6 +126,16 @@ export class AuthService {
     const employee = await this.findPublicEmployee(user.id);
 
     return this.toPublicUser({ ...user, role, employee });
+  }
+
+  async logout(actor: AuthUser) {
+    await this.prisma.user.update({
+      where: { id: actor.sub },
+      data: { sessionVersion: { increment: 1 } },
+      select: { id: true },
+    });
+
+    return { ok: true };
   }
 
   async updateThemePreference(
@@ -228,6 +246,7 @@ export class AuthService {
     avatarUrl: string | null;
     status: string;
     themePreference: ThemePreference;
+    sessionVersion?: number;
     role: { id: string; name: string; permissions: string[] } | null;
     employee: {
       id: string;

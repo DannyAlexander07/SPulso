@@ -26,10 +26,26 @@ export function IdentityLookupButton({
   async function handleLookup() {
     const input = document.getElementById(documentInputId) as HTMLInputElement | null;
     const documentNumber = input?.value.trim() ?? "";
+    const form = input?.closest("form");
+    const employeeCompanyId = form
+      ?.querySelector<HTMLSelectElement | HTMLInputElement>(
+        '[name="employeeCompanyId"]',
+      )
+      ?.value.trim();
+    const accessCompanyId = form
+      ?.querySelector<HTMLSelectElement | HTMLInputElement>('[name="companyId"]')
+      ?.value.trim();
+    const companyId = employeeCompanyId || accessCompanyId || "";
 
     if (!documentNumber) {
       setState("error");
       setMessage("Ingresa un DNI o RUC.");
+      return;
+    }
+
+    if (!companyId) {
+      setState("error");
+      setMessage("Selecciona la empresa antes de consultar.");
       return;
     }
 
@@ -41,7 +57,7 @@ export function IdentityLookupButton({
     }
 
     try {
-      const result = await lookupIdentityDocument(documentNumber);
+      const result = await lookupIdentityDocument(documentNumber, companyId);
       onFound(result);
       setState("success");
       setMessage(result.tipo === "DNI" ? "DNI importado" : "RUC importado");

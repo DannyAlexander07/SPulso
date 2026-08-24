@@ -103,6 +103,11 @@ export const permissionMatrix = [
         label: 'Gestionar documentos',
         description: 'Crear, editar, publicar y administrar documentos.',
       },
+      {
+        key: 'documents.export',
+        label: 'Exportar documentos',
+        description: 'Descargar archivos documentales de forma masiva.',
+      },
     ],
   },
   {
@@ -254,6 +259,7 @@ export const rolePermissionPresets: RolePermissionPreset[] = [
       'attendance.view',
       'requests.view',
       'documents.view',
+      'documents.export',
       'benefits.view',
       'announcements.view',
       'notifications.view',
@@ -273,6 +279,7 @@ export const rolePermissionPresets: RolePermissionPreset[] = [
       'requests.create',
       'requests.approve',
       'documents.view',
+      'documents.export',
       'benefits.view',
       'announcements.view',
       'notifications.view',
@@ -283,13 +290,6 @@ export const rolePermissionPresets: RolePermissionPreset[] = [
     name: 'Trabajador',
     description:
       'Accede a su portal, ficha, solicitudes, documentos y beneficios.',
-    permissions: [
-      'attendance.mark',
-      'requests.create',
-      'documents.view',
-      'benefits.view',
-      'announcements.view',
-      'notifications.view',
-    ],
+    permissions: ['attendance.mark'],
   },
 ] as const;

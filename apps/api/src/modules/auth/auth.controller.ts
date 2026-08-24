@@ -28,6 +28,12 @@ export class AuthController {
     return this.authService.me(authorization);
   }
 
+  @Post('logout')
+  @UseGuards(JwtAuthGuard)
+  logout(@CurrentUser() user: AuthUser) {
+    return this.authService.logout(user);
+  }
+
   @Patch('theme')
   @UseGuards(JwtAuthGuard)
   updateTheme(

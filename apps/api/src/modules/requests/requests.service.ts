@@ -202,6 +202,18 @@ export class RequestsService {
       throw new BadRequestException('El trabajador seleccionado no existe.');
     }
 
+    const canCreateForOthers = (actor.permissions ?? []).includes(
+      'requests.approve',
+    );
+    if (
+      !canCreateForOthers &&
+      (!actor.employeeId || employee.id !== actor.employeeId)
+    ) {
+      throw new BadRequestException(
+        'Tu acceso solo permite crear solicitudes propias.',
+      );
+    }
+
     assertCompanyAccess(actor, employee.companyId);
 
     const startDate = new Date(startDateValue);

@@ -11,6 +11,10 @@ import {
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../../database/prisma.service';
 import {
+  performDummyPinComparison,
+  verifyAttendancePinAtomically,
+} from '../../security/attendance-pin-security';
+import {
   buildPaginationMeta,
   sliceCursorPage,
   toOptionalCursor,
@@ -247,6 +251,8 @@ export class EmployeesService {
         employeeCode,
         attendancePinHash: await bcrypt.hash(attendancePin, 10),
         attendancePinChangeRequired: true,
+        attendancePinFailedAttempts: 0,
+        attendancePinLockedUntil: null,
         jobTitle: this.normalizeOptionalLabel(createEmployeeDto.jobTitle, 90),
         area: this.normalizeOptionalLabel(createEmployeeDto.area, 80),
         hireDate,
@@ -583,6 +589,8 @@ export class EmployeesService {
     if (!employee || employee.tenantId !== tenantId) {
       throw new BadRequestException('El trabajador seleccionado no existe.');
     }
+
+    assertCompanyAccess(actor, employee.companyId);
 
     if (firstName) {
       this.assertPersonName(firstName, 'El nombre');
@@ -957,6 +965,8 @@ export class EmployeesService {
       data: {
         attendancePinHash: await bcrypt.hash(attendancePin, 10),
         attendancePinChangeRequired: true,
+        attendancePinFailedAttempts: 0,
+        attendancePinLockedUntil: null,
       },
       select: this.employeeSelect(),
     });
@@ -1097,32 +1107,31 @@ export class EmployeesService {
         firstName: true,
         lastName: true,
         attendancePinHash: true,
+        attendancePinFailedAttempts: true,
+        attendancePinLockedUntil: true,
       },
     });
 
     if (!employee) {
+      await performDummyPinComparison(currentPin);
       throw new BadRequestException(
         'No pudimos validar tu empresa, codigo o PIN.',
       );
     }
 
+    const replacementHash = await bcrypt.hash(newPin, 10);
     if (
-      !employee.attendancePinHash ||
-      !(await bcrypt.compare(currentPin, employee.attendancePinHash))
+      !(await verifyAttendancePinAtomically(
+        this.prisma,
+        employee.id,
+        currentPin,
+        replacementHash,
+      ))
     ) {
       throw new BadRequestException(
         'No pudimos validar tu empresa, codigo o PIN.',
       );
     }
-
-    await this.prisma.employee.update({
-      where: { id: employee.id },
-      data: {
-        attendancePinHash: await bcrypt.hash(newPin, 10),
-        attendancePinChangeRequired: false,
-      },
-      select: { id: true },
-    });
 
     await this.auditService.write({
       tenantId: employee.tenantId,
@@ -1977,9 +1986,9 @@ export class EmployeesService {
       throw new BadRequestException('El PIN de marcacion es obligatorio.');
     }
 
-    if (!/^\d{4,8}$/.test(pin)) {
+    if (!/^\d{6,8}$/.test(pin)) {
       throw new BadRequestException(
-        'El PIN de marcacion debe tener entre 4 y 8 digitos.',
+        'El PIN de marcacion debe tener entre 6 y 8 digitos.',
       );
     }
 

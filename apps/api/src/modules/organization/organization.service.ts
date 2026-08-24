@@ -6,6 +6,10 @@ import {
 import { JobPositionScope, OrganizationStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import {
+  assertCompanyAccess,
+  hasGlobalCompanyAccess,
+} from '../auth/access-scope';
 import type { AuthUser } from '../auth/jwt-auth.guard';
 import type {
   CreateAreaDto,
@@ -134,6 +138,7 @@ export class OrganizationService {
       );
     }
 
+    assertCompanyAccess(actor, companyId);
     await this.assertCompany(tenantId, companyId);
     const slug = this.toSlug(createAreaDto.slug || name);
     await this.assertAreaSlugAvailable(companyId, slug);
@@ -183,6 +188,9 @@ export class OrganizationService {
       'La empresa no es valida.',
     );
     const targetCompanyId = companyId ?? area.companyId;
+
+    assertCompanyAccess(actor, area.companyId);
+    assertCompanyAccess(actor, targetCompanyId);
 
     if (companyId && companyId !== area.companyId) {
       await this.assertCompany(tenantId, companyId);
@@ -245,6 +253,7 @@ export class OrganizationService {
       );
     }
 
+    assertCompanyAccess(actor, companyId);
     await this.assertCompany(tenantId, companyId);
     const slug = this.toSlug(createClientDto.slug || name);
     await this.assertClientSlugAvailable(companyId, slug);
@@ -295,6 +304,9 @@ export class OrganizationService {
       false,
     );
     const status = this.normalizeOptionalStatus(updateClientDto.status);
+
+    assertCompanyAccess(actor, client.companyId);
+    assertCompanyAccess(actor, targetCompanyId);
 
     if (companyId && companyId !== client.companyId) {
       await this.assertCompany(tenantId, companyId);
@@ -383,8 +395,15 @@ export class OrganizationService {
         );
       }
 
+      assertCompanyAccess(actor, scopedCompanyId);
       await this.assertCompany(tenantId, scopedCompanyId);
       await this.assertOptionalArea(tenantId, scopedCompanyId, areaId);
+    }
+
+    if (scope === JobPositionScope.GROUP && !hasGlobalCompanyAccess(actor)) {
+      throw new BadRequestException(
+        'Solo un administrador global puede crear cargos de grupo.',
+      );
     }
 
     if (scope === JobPositionScope.GROUP && areaId) {
@@ -460,6 +479,9 @@ export class OrganizationService {
         : updateJobPositionDto.areaId !== undefined
           ? areaId
           : position.areaId;
+
+    this.assertPositionAccess(actor, position.scope, position.companyId);
+    this.assertPositionAccess(actor, targetScope, targetCompanyId);
 
     if (targetScope === JobPositionScope.COMPANY && !targetCompanyId) {
       throw new BadRequestException(
@@ -593,6 +615,7 @@ export class OrganizationService {
       );
     }
 
+    assertCompanyAccess(actor, companyId);
     await this.assertCompany(tenantId, companyId);
     await this.assertOptionalArea(tenantId, companyId, areaId);
     await this.assertOptionalClient(tenantId, companyId, clientId);
@@ -660,6 +683,9 @@ export class OrganizationService {
     );
     const status = this.normalizeOptionalStatus(updateWorkTeamDto.status);
     const targetCompanyId = companyId ?? team.companyId;
+
+    assertCompanyAccess(actor, team.companyId);
+    assertCompanyAccess(actor, targetCompanyId);
 
     if (companyId && companyId !== team.companyId) {
       await this.assertCompany(tenantId, companyId);
@@ -747,6 +773,7 @@ export class OrganizationService {
     const tenantId = actor.tenantId;
     const id = this.requireId(teamId, 'El equipo es obligatorio.');
     const team = await this.findTeamOrThrow(tenantId, id);
+    assertCompanyAccess(actor, team.companyId);
     const leaderEmployeeId = this.toOptionalUuid(
       updateWorkTeamMembersDto.leaderEmployeeId,
       'El responsable no es valido.',
@@ -828,6 +855,7 @@ export class OrganizationService {
   ) {
     const tenantId = actor.tenantId;
     const resolved = await this.resolveAssignmentInput(tenantId, dto);
+    assertCompanyAccess(actor, resolved.companyId);
 
     const assignment = await this.prisma.employeeClientAssignment.create({
       data: {
@@ -870,6 +898,7 @@ export class OrganizationService {
     const tenantId = actor.tenantId;
     const id = this.requireId(assignmentId, 'La asignacion es obligatoria.');
     const current = await this.findAssignmentOrThrow(tenantId, id);
+    assertCompanyAccess(actor, current.company.id);
     const resolved =
       dto.employeeId !== undefined ||
       dto.clientId !== undefined ||
@@ -883,6 +912,10 @@ export class OrganizationService {
           })
         : null;
     const status = this.normalizeOptionalStatus(dto.status);
+
+    if (resolved) {
+      assertCompanyAccess(actor, resolved.companyId);
+    }
 
     const updated = await this.prisma.employeeClientAssignment.update({
       where: { id: current.id },
@@ -944,6 +977,24 @@ export class OrganizationService {
         select: { employees: true, jobPositions: true, workTeams: true },
       },
     };
+  }
+
+  private assertPositionAccess(
+    actor: AuthUser,
+    scope: JobPositionScope,
+    companyId: string | null,
+  ) {
+    if (scope === JobPositionScope.GROUP) {
+      if (!hasGlobalCompanyAccess(actor)) {
+        throw new BadRequestException(
+          'Solo un administrador global puede gestionar cargos de grupo.',
+        );
+      }
+
+      return;
+    }
+
+    assertCompanyAccess(actor, companyId);
   }
 
   private positionSelect() {

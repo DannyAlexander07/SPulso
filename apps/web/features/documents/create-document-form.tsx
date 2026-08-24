@@ -30,7 +30,6 @@ export const documentTypes: Array<{ label: string; value: EmployeeDocument["type
 export const documentStatuses: Array<{ label: string; value: EmployeeDocument["status"] }> = [
   { label: "Borrador", value: "DRAFT" },
   { label: "Pendiente de firma", value: "PENDING_SIGNATURE" },
-  { label: "Firmado", value: "SIGNED" },
   { label: "Vencido", value: "EXPIRED" },
 ];
 
@@ -304,7 +303,7 @@ export function CreateDocumentForm({
                       <textarea className={`${inputClassName} h-24 py-3`} name="notes" placeholder="Detalle opcional para RRHH" />
                     </Field>
                     <div className="rounded-2xl border border-[#e1e5eb] bg-[#fbfcfd] p-3 text-sm text-[#667085] lg:col-span-3">
-                      <input accept=".pdf,.doc,.docx,image/jpeg,image/png,image/webp" className="hidden" onChange={handleFileUpload} ref={fileInputRef} type="file" />
+                      <input accept=".pdf,image/jpeg,image/png,image/webp" className="hidden" onChange={handleFileUpload} ref={fileInputRef} type="file" />
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <div>
                           <p className="font-semibold text-[#344054]">Archivo del documento</p>

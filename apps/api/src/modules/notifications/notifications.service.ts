@@ -41,6 +41,13 @@ type EnabledRule = {
   priority: NotificationPriority;
 };
 
+const NOTIFICATION_SYNC_TTL_MS = 60_000;
+const notificationSyncs = new Map<
+  string,
+  { completedAt: number; running: Promise<void> | null }
+>();
+const notificationSeedOffsets = new Map<string, number>();
+
 @Injectable()
 export class NotificationsService {
   constructor(
@@ -242,6 +249,31 @@ export class NotificationsService {
   }
 
   private async syncAutomatedNotifications(tenantId: string) {
+    const current = notificationSyncs.get(tenantId);
+    if (current?.running) return current.running;
+    if (
+      current &&
+      Date.now() - current.completedAt < NOTIFICATION_SYNC_TTL_MS
+    ) {
+      return;
+    }
+
+    const running = this.performAutomatedNotificationSync(tenantId).finally(
+      () => {
+        notificationSyncs.set(tenantId, {
+          completedAt: Date.now(),
+          running: null,
+        });
+      },
+    );
+    notificationSyncs.set(tenantId, {
+      completedAt: current?.completedAt ?? 0,
+      running,
+    });
+    return running;
+  }
+
+  private async performAutomatedNotificationSync(tenantId: string) {
     await this.deleteOrphanedDocumentNotifications(tenantId);
 
     const rules = await this.automationsService.getEnabledRules(tenantId);
@@ -251,22 +283,39 @@ export class NotificationsService {
       rules,
     );
 
-    await Promise.all(
-      seeds.map((seed) =>
-        this.prisma.notification.upsert({
-          where: { tenantId_ruleKey: { tenantId, ruleKey: seed.ruleKey } },
-          create: { tenantId, ...seed },
-          update: {
-            actionHref: seed.actionHref,
-            companyId: seed.companyId,
-            message: seed.message,
-            priority: seed.priority,
-            title: seed.title,
-            generatedAt: new Date(),
-          },
-        }),
-      ),
-    );
+    const start = seeds.length
+      ? (notificationSeedOffsets.get(tenantId) ?? 0) % seeds.length
+      : 0;
+    const cappedSeeds = seeds.length
+      ? [...seeds.slice(start), ...seeds.slice(0, start)].slice(0, 500)
+      : [];
+    if (seeds.length > 0) {
+      notificationSeedOffsets.set(
+        tenantId,
+        (start + cappedSeeds.length) % seeds.length,
+      );
+    } else {
+      notificationSeedOffsets.delete(tenantId);
+    }
+    for (let index = 0; index < cappedSeeds.length; index += 25) {
+      const batch = cappedSeeds.slice(index, index + 25);
+      await Promise.all(
+        batch.map((seed) =>
+          this.prisma.notification.upsert({
+            where: { tenantId_ruleKey: { tenantId, ruleKey: seed.ruleKey } },
+            create: { tenantId, ...seed },
+            update: {
+              actionHref: seed.actionHref,
+              companyId: seed.companyId,
+              message: seed.message,
+              priority: seed.priority,
+              title: seed.title,
+              generatedAt: new Date(),
+            },
+          }),
+        ),
+      );
+    }
   }
 
   private async deleteOrphanedDocumentNotifications(tenantId: string) {
@@ -518,6 +567,7 @@ export class NotificationsService {
         workDate: { gte: this.addDays(today, -(windowDays - 1)), lte: today },
       },
       orderBy: { workDate: 'desc' },
+      take: 5_000,
       select: {
         id: true,
         companyId: true,

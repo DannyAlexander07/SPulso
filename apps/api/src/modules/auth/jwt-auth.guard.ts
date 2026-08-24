@@ -18,6 +18,7 @@ export type AuthUser = {
   permissions?: string[];
   employeeId?: string | null;
   themePreference?: 'light' | 'dark' | 'star';
+  sessionVersion?: number;
 };
 
 @Injectable()
@@ -53,11 +54,16 @@ export class JwtAuthGuard implements CanActivate {
           email: true,
           avatarUrl: true,
           status: true,
+          sessionVersion: true,
           themePreference: true,
         },
       });
 
-      if (!user || user.status !== 'ACTIVE') {
+      if (
+        !user ||
+        user.status !== 'ACTIVE' ||
+        payload.sessionVersion !== user.sessionVersion
+      ) {
         throw new UnauthorizedException('Sesion no valida.');
       }
 
@@ -88,6 +94,7 @@ export class JwtAuthGuard implements CanActivate {
           | 'light'
           | 'dark'
           | 'star',
+        sessionVersion: user.sessionVersion,
       };
       return true;
     } catch (error) {

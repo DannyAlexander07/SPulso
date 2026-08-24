@@ -1,7 +1,10 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { AttendanceStatus, Prisma } from '@prisma/client';
-import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../../database/prisma.service';
+import {
+  performDummyPinComparison,
+  verifyAttendancePinAtomically,
+} from '../../security/attendance-pin-security';
 import { AuditService } from '../audit/audit.service';
 import {
   assertCompanyAccess,
@@ -301,6 +304,8 @@ export class AttendanceService {
         jobTitle: true,
         attendancePinHash: true,
         attendancePinChangeRequired: true,
+        attendancePinFailedAttempts: true,
+        attendancePinLockedUntil: true,
         company: {
           select: {
             id: true,
@@ -318,15 +323,13 @@ export class AttendanceService {
     });
 
     if (!employee) {
+      await performDummyPinComparison(pin);
       throw new BadRequestException(
         'No pudimos validar tus datos de marcacion.',
       );
     }
 
-    if (
-      !employee.attendancePinHash ||
-      !(await bcrypt.compare(pin, employee.attendancePinHash))
-    ) {
+    if (!(await verifyAttendancePinAtomically(this.prisma, employee.id, pin))) {
       throw new BadRequestException(
         'No pudimos validar tus datos de marcacion.',
       );

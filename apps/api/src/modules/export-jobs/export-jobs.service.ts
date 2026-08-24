@@ -31,6 +31,12 @@ import type { CreateExportJobDto } from './dto/create-export-job.dto';
 const EXPORT_BATCH_SIZE = 500;
 const EXPORT_STORAGE_PREFIX = 'exportaciones';
 const EXPORT_TMP_DIR = join(process.cwd(), 'uploads', 'tmp', 'exportaciones');
+const MAX_ACTIVE_EXPORTS_PER_TENANT = 50;
+const MAX_ACTIVE_EXPORTS_PER_USER = 3;
+const MAX_DAILY_EXPORTS_PER_TENANT = 200;
+const MAX_DAILY_EXPORTS_PER_USER = 20;
+const MAX_EXPORT_BYTES = 100 * 1024 * 1024;
+const MAX_EXPORT_ROWS = 100_000;
 
 type ExportFilters = Record<string, unknown>;
 
@@ -124,16 +130,100 @@ export class ExportJobsService {
     const filters = this.normalizeFilters(dto?.filters);
     const companyId = this.resolveCompanyScope(actor, filters);
 
-    const job = await this.prisma.exportJob.create({
-      data: {
-        tenantId: actor.tenantId,
-        companyId,
-        requestedById: actor.sub,
-        type,
-        filters: this.toJson(filters),
-      },
-      select: this.exportJobSelect(),
-    });
+    const job = await (async () => {
+      try {
+        return await this.prisma.$transaction(
+          async (tx) => {
+            const activeStatuses = [
+              ExportJobStatus.PENDING,
+              ExportJobStatus.PROCESSING,
+            ];
+            const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+            const [tenantActive, userActive, tenantDaily, userDaily, userJobs] =
+              await Promise.all([
+                tx.exportJob.count({
+                  where: {
+                    tenantId: actor.tenantId,
+                    status: { in: activeStatuses },
+                  },
+                }),
+                tx.exportJob.count({
+                  where: {
+                    requestedById: actor.sub,
+                    status: { in: activeStatuses },
+                  },
+                }),
+                tx.exportJob.count({
+                  where: {
+                    createdAt: { gte: since },
+                    tenantId: actor.tenantId,
+                  },
+                }),
+                tx.exportJob.count({
+                  where: {
+                    createdAt: { gte: since },
+                    requestedById: actor.sub,
+                  },
+                }),
+                tx.exportJob.findMany({
+                  where: {
+                    requestedById: actor.sub,
+                    status: { in: activeStatuses },
+                  },
+                  select: { companyId: true, filters: true, type: true },
+                }),
+              ]);
+
+            if (
+              tenantActive >= MAX_ACTIVE_EXPORTS_PER_TENANT ||
+              userActive >= MAX_ACTIVE_EXPORTS_PER_USER ||
+              tenantDaily >= MAX_DAILY_EXPORTS_PER_TENANT ||
+              userDaily >= MAX_DAILY_EXPORTS_PER_USER
+            ) {
+              throw new BadRequestException(
+                'Ya hay varias exportaciones en proceso. Espera a que terminen antes de crear otra.',
+              );
+            }
+
+            if (
+              userJobs.some(
+                (existing) =>
+                  existing.type === type &&
+                  existing.companyId === companyId &&
+                  this.canonicalJson(existing.filters ?? {}) ===
+                    this.canonicalJson(filters),
+              )
+            ) {
+              throw new BadRequestException(
+                'Ya existe una exportacion equivalente pendiente o en proceso.',
+              );
+            }
+
+            return tx.exportJob.create({
+              data: {
+                tenantId: actor.tenantId,
+                companyId,
+                requestedById: actor.sub,
+                type,
+                filters: this.toJson(filters),
+              },
+              select: this.exportJobSelect(),
+            });
+          },
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+        );
+      } catch (error) {
+        if (
+          error instanceof Prisma.PrismaClientKnownRequestError &&
+          error.code === 'P2034'
+        ) {
+          throw new BadRequestException(
+            'Otra exportacion se creo al mismo tiempo. Reintenta en unos segundos.',
+          );
+        }
+        throw error;
+      }
+    })();
 
     await this.auditService.write({
       tenantId: actor.tenantId,
@@ -382,18 +472,20 @@ export class ExportJobsService {
       });
     }
 
+    const temporaryPath = join(EXPORT_TMP_DIR, `${job.id}.csv`);
+    let storedFilePath: string | null = null;
+
     try {
       await mkdir(EXPORT_TMP_DIR, { recursive: true });
       const fileName = this.fileName(job.type);
       const storageKey = `${EXPORT_STORAGE_PREFIX}/${job.id}.csv`;
-      const temporaryPath = join(EXPORT_TMP_DIR, `${job.id}.csv`);
       const rowCount = await this.writeCsv(job, temporaryPath);
       const filePath = await this.fileStorage.storeFile({
         contentType: 'text/csv; charset=utf-8',
         key: storageKey,
         sourcePath: temporaryPath,
       });
-      await unlink(temporaryPath).catch(() => undefined);
+      storedFilePath = filePath;
 
       await this.prisma.exportJob.update({
         where: { id: job.id },
@@ -418,6 +510,11 @@ export class ExportJobsService {
         after: this.toJson({ rowCount, type: job.type }),
       });
     } catch (error) {
+      if (storedFilePath) {
+        await this.fileStorage
+          .deleteFile(storedFilePath)
+          .catch(() => undefined);
+      }
       const message =
         error instanceof Error
           ? error.message
@@ -427,9 +524,14 @@ export class ExportJobsService {
         data: {
           completedAt: new Date(),
           errorMessage: message.slice(0, 500),
+          fileName: null,
+          filePath: null,
+          rowCount: 0,
           status: ExportJobStatus.FAILED,
         },
       });
+    } finally {
+      await unlink(temporaryPath).catch(() => undefined);
     }
   }
 
@@ -746,11 +848,20 @@ export class ExportJobsService {
     );
 
     let cursor: string | undefined;
+    let writtenBytes = Buffer.byteLength(
+      `\uFEFF${columns.map((column) => this.escapeCsvValue(column.header)).join(';')}\n`,
+      'utf8',
+    );
     let rowCount = 0;
 
     for (;;) {
       const batch = await getBatch(cursor);
       if (batch.length === 0) break;
+      if (rowCount + batch.length > MAX_EXPORT_ROWS) {
+        throw new Error(
+          `La exportacion supera el limite seguro de ${MAX_EXPORT_ROWS} filas.`,
+        );
+      }
 
       const csv = batch
         .map((item) =>
@@ -759,7 +870,12 @@ export class ExportJobsService {
             .join(';'),
         )
         .join('\n');
-      await appendFile(absolutePath, `${csv}\n`);
+      const chunk = `${csv}\n`;
+      writtenBytes += Buffer.byteLength(chunk, 'utf8');
+      if (writtenBytes > MAX_EXPORT_BYTES) {
+        throw new Error('La exportacion supera el limite seguro de 100 MB.');
+      }
+      await appendFile(absolutePath, chunk);
 
       rowCount += batch.length;
       cursor = batch[batch.length - 1]?.id;
@@ -768,6 +884,22 @@ export class ExportJobsService {
     }
 
     return rowCount;
+  }
+
+  private canonicalJson(value: unknown): string {
+    if (Array.isArray(value)) {
+      return `[${value.map((item) => this.canonicalJson(item)).join(',')}]`;
+    }
+    if (value && typeof value === 'object') {
+      const record = value as Record<string, unknown>;
+      return `{${Object.keys(record)
+        .sort()
+        .map(
+          (key) => `${JSON.stringify(key)}:${this.canonicalJson(record[key])}`,
+        )
+        .join(',')}}`;
+    }
+    return JSON.stringify(value) ?? 'null';
   }
 
   private jobScope(actor: AuthUser): Prisma.ExportJobWhereInput {

@@ -26,5 +26,17 @@ describe('resolveLocalDocumentUploadPath', () => {
         workingDirectory,
       ),
     ).toBeNull();
+    expect(
+      resolveLocalDocumentUploadPath(
+        '/uploads/documentos/../usuarios/avatar.jpg',
+        workingDirectory,
+      ),
+    ).toBeNull();
+    expect(
+      resolveLocalDocumentUploadPath(
+        '/uploads/documentos/..\\comunicados\\archivo.pdf',
+        workingDirectory,
+      ),
+    ).toBeNull();
   });
 });

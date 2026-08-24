@@ -1,6 +1,8 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { AutomationRuleType, NotificationPriority } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
+import { assertCompanyAccess } from '../auth/access-scope';
+import type { AuthUser } from '../auth/jwt-auth.guard';
 import type { UpdateAutomationRuleDto } from './dto/update-automation-rule.dto';
 
 const defaultRules = [
@@ -72,10 +74,11 @@ export class AutomationsService {
   }
 
   async update(
-    tenantId: string,
+    actor: AuthUser,
     id: string,
     updateAutomationRuleDto: UpdateAutomationRuleDto,
   ) {
+    const tenantId = actor.tenantId;
     await this.ensureDefaultRules(tenantId);
 
     const ruleId = this.toOptionalString(id);
@@ -86,12 +89,14 @@ export class AutomationsService {
 
     const rule = await this.prisma.automationRule.findUnique({
       where: { id: ruleId },
-      select: { id: true, tenantId: true },
+      select: { companyId: true, id: true, tenantId: true },
     });
 
     if (!rule || rule.tenantId !== tenantId) {
       throw new BadRequestException('La regla seleccionada no existe.');
     }
+
+    assertCompanyAccess(actor, rule.companyId);
 
     return this.prisma.automationRule.update({
       where: { id: rule.id },

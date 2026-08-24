@@ -1,8 +1,14 @@
 import type { NextFunction, Request, Response } from 'express';
+import { createHash } from 'node:crypto';
 
 type RateLimitRule = {
   limit: number;
   windowMs: number;
+};
+
+type RateLimitIdentity = {
+  limit: number;
+  value: string;
 };
 
 const requestBuckets = new Map<string, { count: number; resetAt: number }>();
@@ -38,34 +44,37 @@ export function getCorsOrigins() {
 export function createRateLimitMiddleware() {
   return (request: Request, response: Response, next: NextFunction) => {
     const rule = getRateLimitRule(request.path);
-    const key = `${getClientIp(request)}:${request.method}:${normalizeRateLimitPath(request.path)}`;
+    const suffix = `${request.method}:${normalizeRateLimitPath(request.path)}`;
+    const identities = getRateLimitIdentities(request, rule);
     const now = Date.now();
-    const bucket = requestBuckets.get(key);
+    ensureBucketCapacity(now);
 
-    if (!bucket || bucket.resetAt <= now) {
-      ensureBucketCapacity(now);
-      requestBuckets.set(key, { count: 1, resetAt: now + rule.windowMs });
-      setRateLimitHeaders(
-        response,
-        rule.limit,
-        rule.limit - 1,
-        now + rule.windowMs,
-      );
-      return next();
-    }
-
-    bucket.count += 1;
-    setRateLimitHeaders(
-      response,
-      rule.limit,
-      Math.max(rule.limit - bucket.count, 0),
-      bucket.resetAt,
+    const buckets = identities.map((identity) => {
+      const key = `${identity.value}:${suffix}`;
+      const current = requestBuckets.get(key);
+      const bucket =
+        !current || current.resetAt <= now
+          ? { count: 1, resetAt: now + rule.windowMs }
+          : { count: current.count + 1, resetAt: current.resetAt };
+      requestBuckets.set(key, bucket);
+      return { bucket, limit: identity.limit };
+    });
+    const blockedEntry = buckets.find(
+      ({ bucket, limit }) => bucket.count > limit,
     );
+    const remaining = Math.min(
+      ...buckets.map(({ bucket, limit }) => Math.max(limit - bucket.count, 0)),
+    );
+    const resetAt =
+      blockedEntry?.bucket.resetAt ??
+      Math.max(...buckets.map(({ bucket }) => bucket.resetAt));
 
-    if (bucket.count > rule.limit) {
+    setRateLimitHeaders(response, rule.limit, remaining, resetAt);
+
+    if (blockedEntry) {
       response.setHeader(
         'Retry-After',
-        Math.ceil((bucket.resetAt - now) / 1000),
+        Math.ceil((blockedEntry.bucket.resetAt - now) / 1000),
       );
       return response.status(429).json({
         message: 'Demasiadas solicitudes. Intenta nuevamente en unos segundos.',
@@ -150,6 +159,50 @@ function getRateLimitRule(path: string): RateLimitRule {
     };
   }
 
+  if (path === '/archivos/documentos' || path === '/files/documents') {
+    return {
+      limit: positiveIntegerEnv('DOCUMENT_UPLOAD_RATE_LIMIT', 6),
+      windowMs: 60_000,
+    };
+  }
+
+  if (
+    [
+      '/archivos/comunicados',
+      '/files/announcements',
+      '/archivos/usuarios',
+      '/files/users',
+      '/portal/foto/archivo',
+      '/portal/photo/file',
+    ].includes(path)
+  ) {
+    return {
+      limit: positiveIntegerEnv('MEDIA_UPLOAD_RATE_LIMIT', 10),
+      windowMs: 60_000,
+    };
+  }
+
+  if (path === '/exportaciones' || path === '/export-jobs') {
+    return {
+      limit: positiveIntegerEnv('EXPORT_CREATE_RATE_LIMIT', 5),
+      windowMs: 60_000,
+    };
+  }
+
+  if (path === '/documentos/exportar/zip' || path === '/documents/export/zip') {
+    return {
+      limit: positiveIntegerEnv('DOCUMENT_ZIP_RATE_LIMIT', 2),
+      windowMs: 60_000,
+    };
+  }
+
+  if (/^\/portal\/(documentos|documents)\/[^/]+\/(firmar|sign)$/.test(path)) {
+    return {
+      limit: positiveIntegerEnv('DOCUMENT_SIGN_RATE_LIMIT', 5),
+      windowMs: 60_000,
+    };
+  }
+
   return { limit: positiveIntegerEnv('API_RATE_LIMIT', 600), windowMs: 60_000 };
 }
 
@@ -164,6 +217,77 @@ function normalizeRateLimitPath(path: string) {
 
 function getClientIp(request: Request) {
   return request.ip || request.socket.remoteAddress || 'unknown';
+}
+
+function getRateLimitIdentities(
+  request: Request,
+  rule: RateLimitRule,
+): RateLimitIdentity[] {
+  const body = request.body as Record<string, unknown> | undefined;
+  const publicAccountPath = isPublicAccountRateLimitPath(request.path);
+  const accountIdentifier =
+    request.path === '/auth/login'
+      ? normalizeIdentity(body?.email)
+      : publicAccountPath
+        ? [
+            normalizeIdentity(body?.tenantSlug),
+            normalizeIdentity(body?.companySlug),
+            normalizeIdentity(body?.identifier),
+          ]
+            .filter(Boolean)
+            .join(':')
+        : null;
+
+  if (request.path === '/auth/login' || publicAccountPath) {
+    const identities: RateLimitIdentity[] = [
+      { limit: rule.limit, value: `ip:${getClientIp(request)}` },
+    ];
+    if (accountIdentifier) {
+      identities.push({
+        limit: rule.limit,
+        value: `account:${fingerprint(accountIdentifier)}`,
+      });
+    }
+    return identities;
+  }
+
+  const authorization = request.headers.authorization;
+  if (authorization?.startsWith('Bearer ')) {
+    return [
+      {
+        limit: rule.limit,
+        value: `session:${fingerprint(authorization.slice('Bearer '.length))}`,
+      },
+      {
+        limit: positiveIntegerEnv(
+          'API_AGGREGATE_IP_RATE_LIMIT',
+          Math.max(rule.limit * 10, 1_200),
+        ),
+        value: `ip:${getClientIp(request)}`,
+      },
+    ];
+  }
+
+  return [{ limit: rule.limit, value: `ip:${getClientIp(request)}` }];
+}
+
+function isPublicAccountRateLimitPath(path: string) {
+  return [
+    '/asistencia/marcacion-personal',
+    '/attendance/self-mark',
+    '/trabajadores/actualizar-pin-marcacion',
+    '/employees/self-attendance-pin',
+  ].includes(path);
+}
+
+function normalizeIdentity(value: unknown) {
+  return typeof value === 'string'
+    ? value.trim().toLowerCase().slice(0, 254)
+    : '';
+}
+
+function fingerprint(value: string) {
+  return createHash('sha256').update(value).digest('hex').slice(0, 24);
 }
 
 function cleanupExpiredBuckets(now: number) {

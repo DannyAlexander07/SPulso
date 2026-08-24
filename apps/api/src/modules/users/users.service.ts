@@ -122,6 +122,8 @@ export class UsersService {
       throw new BadRequestException('El nombre del rol es obligatorio.');
     }
 
+    this.assertCanManageRole(actor, { name, permissions }, 'crear este rol');
+
     const existingRole = await this.prisma.role.findUnique({
       where: {
         tenantId_name: {
@@ -193,6 +195,15 @@ export class UsersService {
 
     if (!role || role.tenantId !== tenantId) {
       throw new BadRequestException('El rol seleccionado no existe.');
+    }
+
+    this.assertCanManageRole(actor, role, 'editar este rol');
+    if (updateRoleDto.permissions !== undefined) {
+      this.assertCanManageRole(
+        actor,
+        { name: name ?? role.name, permissions },
+        'asignar estos permisos',
+      );
     }
 
     if (name && name !== role.name && systemRoleNames.has(role.name)) {
@@ -325,6 +336,7 @@ export class UsersService {
     const employeeCompanyId =
       this.toOptionalString(createUserDto.employeeCompanyId) ?? companyId;
     const avatarUrl = this.toOptionalUploadPath(createUserDto.avatarUrl);
+    await this.assertUserAvatarBinding(actor, avatarUrl);
     const status =
       this.normalizeOptionalUserStatus(createUserDto.status) ??
       UserStatus.ACTIVE;
@@ -377,6 +389,8 @@ export class UsersService {
     if (!role || role.tenantId !== tenantId) {
       throw new BadRequestException('El rol seleccionado no existe.');
     }
+
+    this.assertCanManageRole(actor, role, 'asignar este rol');
 
     if (hasPrivilegedRole({ ...actor, roleName: role.name })) {
       this.assertPrivilegedAccess(actor, 'asignar roles globales');
@@ -670,6 +684,9 @@ export class UsersService {
       updateUserDto.employeeCompanyId,
     );
     const avatarUrl = this.toOptionalUploadPath(updateUserDto.avatarUrl);
+    if (updateUserDto.avatarUrl !== undefined) {
+      await this.assertUserAvatarBinding(actor, avatarUrl);
+    }
     const password = this.toOptionalString(updateUserDto.password);
     const status = this.normalizeOptionalUserStatus(updateUserDto.status);
     const documentNumber = this.normalizeOptionalDocumentNumber(
@@ -720,6 +737,7 @@ export class UsersService {
             id: true,
             name: true,
             description: true,
+            permissions: true,
           },
         },
         employee: {
@@ -739,6 +757,10 @@ export class UsersService {
 
     if (!user || user.tenantId !== tenantId) {
       throw new BadRequestException('El usuario seleccionado no existe.');
+    }
+
+    if (user.role) {
+      this.assertCanManageRole(actor, user.role, 'modificar este usuario');
     }
 
     assertCompanyAccess(actor, user.companyId);
@@ -786,13 +808,14 @@ export class UsersService {
     if (roleId) {
       const role = await this.prisma.role.findUnique({
         where: { id: roleId },
-        select: { id: true, name: true, tenantId: true },
+        select: { id: true, name: true, permissions: true, tenantId: true },
       });
 
       if (!role || role.tenantId !== tenantId) {
         throw new BadRequestException('El rol seleccionado no existe.');
       }
 
+      this.assertCanManageRole(actor, role, 'asignar este rol');
       targetRoleName = role.name;
     }
 
@@ -944,7 +967,10 @@ export class UsersService {
           ...(roleId ? { roleId } : {}),
           ...(updateUserDto.companyId !== undefined ? { companyId } : {}),
           ...(password
-            ? { passwordHash: await bcrypt.hash(password, 10) }
+            ? {
+                passwordHash: await bcrypt.hash(password, 10),
+                sessionVersion: { increment: 1 },
+              }
             : {}),
           ...(status ? { status } : {}),
         },
@@ -979,6 +1005,8 @@ export class UsersService {
               ? {
                   attendancePinHash: await bcrypt.hash(attendancePin, 10),
                   attendancePinChangeRequired: true,
+                  attendancePinFailedAttempts: 0,
+                  attendancePinLockedUntil: null,
                 }
               : {}),
             ...(updateUserDto.areaId !== undefined ? { areaId } : {}),
@@ -1261,6 +1289,29 @@ export class UsersService {
     );
   }
 
+  private assertCanManageRole(
+    actor: AuthUser,
+    role: { name: string; permissions: string[] },
+    action: string,
+  ) {
+    if (role.name === 'Super Admin' && actor.roleName !== 'Super Admin') {
+      throw new ForbiddenException(
+        `Solo un Super Admin puede ${action} relacionado con Super Admin.`,
+      );
+    }
+
+    if (
+      actor.roleName !== 'Super Admin' &&
+      role.permissions.some(
+        (permission) => !(actor.permissions ?? []).includes(permission),
+      )
+    ) {
+      throw new ForbiddenException(
+        `No puedes ${action} con permisos superiores a los tuyos.`,
+      );
+    }
+  }
+
   private auditUserSnapshot(user: {
     id: string;
     email: string;
@@ -1442,9 +1493,9 @@ export class UsersService {
       throw new BadRequestException('El PIN de marcacion es obligatorio.');
     }
 
-    if (!/^\d{4,8}$/.test(pin)) {
+    if (!/^\d{6,8}$/.test(pin)) {
       throw new BadRequestException(
-        'El PIN de marcacion debe tener entre 4 y 8 digitos.',
+        'El PIN de marcacion debe tener entre 6 y 8 digitos.',
       );
     }
 
@@ -1792,6 +1843,26 @@ export class UsersService {
     }
 
     return normalized;
+  }
+
+  private async assertUserAvatarBinding(
+    actor: AuthUser,
+    avatarUrl: string | null,
+  ) {
+    if (!avatarUrl) return;
+    const expectedPrefix = `/uploads/usuarios/${actor.tenantId}--${actor.sub}--`;
+    if (avatarUrl.startsWith(expectedPrefix)) return;
+
+    const existingOwner = await this.prisma.user.findFirst({
+      where: { avatarUrl, tenantId: actor.tenantId },
+      select: { companyId: true, id: true },
+    });
+    if (!existingOwner) {
+      throw new BadRequestException(
+        'La imagen de usuario no pertenece a este espacio de trabajo.',
+      );
+    }
+    assertCompanyAccess(actor, existingOwner.companyId);
   }
 
   private normalizePage(value: unknown) {

@@ -287,7 +287,7 @@ export function DocumentRowActions({
                       />
                     </Field>
                     <div className="rounded-2xl border border-[#e1e5eb] bg-[#fbfcfd] p-3 text-sm text-[#667085] lg:col-span-3">
-                      <input accept=".pdf,.doc,.docx,image/jpeg,image/png,image/webp" className="hidden" onChange={handleFileUpload} ref={fileInputRef} type="file" />
+                      <input accept=".pdf,image/jpeg,image/png,image/webp" className="hidden" onChange={handleFileUpload} ref={fileInputRef} type="file" />
                       <p className="font-semibold text-[#344054]">Archivo asociado</p>
                       <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <p>{fileName || (fileUrl ? "Archivo cargado en SPulso." : "Sin archivo adjunto.")}</p>

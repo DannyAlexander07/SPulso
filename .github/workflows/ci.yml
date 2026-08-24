@@ -74,6 +74,9 @@ jobs:
       - name: Build API
         run: npm --prefix apps/api run build
 
+      - name: Test API unit
+        run: npm --prefix apps/api test -- --runInBand
+
       - name: Test API e2e
         run: npm --prefix apps/api run test:e2e
 

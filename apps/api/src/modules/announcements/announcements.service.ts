@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+} from '@nestjs/common';
 import {
   AnnouncementAudienceScope,
   AnnouncementPriority,
@@ -221,6 +225,7 @@ export class AnnouncementsService {
       1200,
     );
     const imageUrl = this.normalizeImageUrl(dto.imageUrl);
+    await this.assertAnnouncementImageBinding(actor, imageUrl);
     const status = this.normalizeStatus(dto.status ?? AnnouncementStatus.DRAFT);
     const priority = this.normalizePriority(
       dto.priority ?? AnnouncementPriority.NORMAL,
@@ -335,6 +340,27 @@ export class AnnouncementsService {
       dto.companyIds !== undefined ||
       dto.teamIds !== undefined ||
       dto.employeeIds !== undefined;
+    const imageUrl =
+      dto.imageUrl !== undefined
+        ? this.normalizeImageUrl(dto.imageUrl)
+        : undefined;
+    if (imageUrl !== undefined) {
+      await this.assertAnnouncementImageBinding(actor, imageUrl);
+    }
+
+    await this.assertScopedAudience(
+      actor,
+      current.audienceScope,
+      current.audiences.flatMap((audience) =>
+        audience.company ? [audience.company.id] : [],
+      ),
+      current.audiences.flatMap((audience) =>
+        audience.team ? [audience.team.id] : [],
+      ),
+      current.audiences.flatMap((audience) =>
+        audience.employee ? [audience.employee.id] : [],
+      ),
+    );
 
     if (shouldReplaceAudience) {
       await this.assertAudience(
@@ -375,9 +401,7 @@ export class AnnouncementsService {
                 ),
               }
             : {}),
-          ...(dto.imageUrl !== undefined
-            ? { imageUrl: this.normalizeImageUrl(dto.imageUrl) }
-            : {}),
+          ...(dto.imageUrl !== undefined ? { imageUrl } : {}),
           ...(dto.status !== undefined
             ? { status: this.normalizeStatus(dto.status) }
             : {}),
@@ -440,6 +464,20 @@ export class AnnouncementsService {
     const announcement = await this.findAnnouncementOrThrow(
       tenantId,
       this.requireText(announcementId, 'El comunicado es obligatorio.'),
+    );
+
+    await this.assertScopedAudience(
+      actor,
+      announcement.audienceScope,
+      announcement.audiences.flatMap((audience) =>
+        audience.company ? [audience.company.id] : [],
+      ),
+      announcement.audiences.flatMap((audience) =>
+        audience.team ? [audience.team.id] : [],
+      ),
+      announcement.audiences.flatMap((audience) =>
+        audience.employee ? [audience.employee.id] : [],
+      ),
     );
 
     if (announcement.status !== AnnouncementStatus.PUBLISHED) {
@@ -575,97 +613,209 @@ export class AnnouncementsService {
     actor: AuthUser,
     announcement: AnnouncementRecord,
   ) {
-    if (announcement.status !== AnnouncementStatus.PUBLISHED) return;
+    await this.syncAnnouncementNotifications(actor, announcement);
 
-    await Promise.all([
-      this.prisma.notification.upsert({
-        where: {
-          tenantId_ruleKey: {
-            tenantId: actor.tenantId,
-            ruleKey: `announcement-published:${announcement.id}`,
-          },
-        },
-        create: {
-          tenantId: actor.tenantId,
-          companyId: null,
-          type: NotificationType.ANNOUNCEMENT_PUBLISHED,
-          priority:
-            announcement.priority === AnnouncementPriority.URGENT
-              ? NotificationPriority.CRITICAL
-              : announcement.priority === AnnouncementPriority.IMPORTANT
-                ? NotificationPriority.WARNING
-                : NotificationPriority.INFO,
-          title: 'Comunicado publicado',
-          message: `Se publico el comunicado: ${announcement.title}.`,
-          actionHref: `/comunicados/${announcement.id}`,
-          entityType: 'Announcement',
-          entityId: announcement.id,
-          ruleKey: `announcement-published:${announcement.id}`,
-        },
-        update: {
-          message: `Se publico el comunicado: ${announcement.title}.`,
-          actionHref: `/comunicados/${announcement.id}`,
-          generatedAt: new Date(),
-          status: NotificationStatus.UNREAD,
-          readAt: null,
-        },
-      }),
+    if (
+      announcement.status === AnnouncementStatus.PUBLISHED &&
       announcement.sendEmail
-        ? this.prepareEmailDeliveries(actor.tenantId, announcement)
-        : Promise.resolve(),
-    ]);
+    ) {
+      await this.prepareEmailDeliveries(actor.tenantId, announcement);
+      return;
+    }
+
+    await this.prisma.announcementEmailDelivery.deleteMany({
+      where: { announcementId: announcement.id, tenantId: actor.tenantId },
+    });
+  }
+
+  private async syncAnnouncementNotifications(
+    actor: AuthUser,
+    announcement: AnnouncementRecord,
+  ) {
+    const scopedCompanyIds: string[] = [
+      ...new Set(
+        announcement.audiences.flatMap((audience) =>
+          audience.company ? [audience.company.id] : [],
+        ),
+      ),
+    ];
+    const companyIds: Array<string | null> =
+      announcement.audienceScope === AnnouncementAudienceScope.ALL
+        ? [null]
+        : announcement.audienceScope === AnnouncementAudienceScope.COMPANIES
+          ? scopedCompanyIds
+          : [];
+    const prefix = `announcement-published:${announcement.id}:`;
+    const targets: Array<{ companyId: string | null; ruleKey: string }> =
+      companyIds.map((companyId) => ({
+        companyId,
+        ruleKey: `${prefix}${companyId ?? 'all'}`,
+      }));
+    const ruleKeys = targets.map((target) => target.ruleKey);
+
+    if (announcement.status !== AnnouncementStatus.PUBLISHED) {
+      await this.prisma.notification.deleteMany({
+        where: {
+          tenantId: actor.tenantId,
+          OR: [
+            { ruleKey: `announcement-published:${announcement.id}` },
+            { ruleKey: { startsWith: prefix } },
+          ],
+        },
+      });
+      return;
+    }
+
+    await this.prisma.notification.deleteMany({
+      where: {
+        tenantId: actor.tenantId,
+        OR: [
+          { ruleKey: `announcement-published:${announcement.id}` },
+          {
+            ruleKey: {
+              startsWith: prefix,
+              ...(ruleKeys.length > 0 ? { notIn: ruleKeys } : {}),
+            },
+          },
+        ],
+      },
+    });
+
+    await Promise.all(
+      targets.map(({ companyId, ruleKey }) =>
+        this.prisma.notification.upsert({
+          where: {
+            tenantId_ruleKey: {
+              tenantId: actor.tenantId,
+              ruleKey,
+            },
+          },
+          create: {
+            tenantId: actor.tenantId,
+            companyId,
+            type: NotificationType.ANNOUNCEMENT_PUBLISHED,
+            priority:
+              announcement.priority === AnnouncementPriority.URGENT
+                ? NotificationPriority.CRITICAL
+                : announcement.priority === AnnouncementPriority.IMPORTANT
+                  ? NotificationPriority.WARNING
+                  : NotificationPriority.INFO,
+            title: 'Comunicado publicado',
+            message: `Se publico el comunicado: ${announcement.title}.`,
+            actionHref: `/comunicados/${announcement.id}`,
+            entityType: 'Announcement',
+            entityId: announcement.id,
+            ruleKey,
+          },
+          update: {
+            companyId,
+            message: `Se publico el comunicado: ${announcement.title}.`,
+            actionHref: `/comunicados/${announcement.id}`,
+            generatedAt: new Date(),
+            status: NotificationStatus.UNREAD,
+            readAt: null,
+          },
+        }),
+      ),
+    );
   }
 
   private async prepareEmailDeliveries(
     tenantId: string,
     announcement: AnnouncementRecord,
   ) {
-    const recipients = await this.prisma.employee.findMany({
-      where: this.recipientWhere(tenantId, announcement),
-      take: 5000,
-      select: {
-        id: true,
-        personalEmail: true,
-      },
-    });
+    await this.prisma.$transaction(
+      async (tx) => {
+        const current = await tx.announcement.findUnique({
+          where: { id: announcement.id },
+          select: { tenantId: true, updatedAt: true },
+        });
+        if (
+          !current ||
+          current.tenantId !== tenantId ||
+          current.updatedAt.getTime() !== announcement.updatedAt.getTime()
+        ) {
+          throw new ConflictException(
+            'La audiencia del comunicado cambio mientras se preparaba el envio.',
+          );
+        }
 
-    await Promise.all(
-      recipients.map((employee) => {
-        const email = this.toOptionalString(employee.personalEmail);
-
-        return this.prisma.announcementEmailDelivery.upsert({
+        const recipients = await tx.employee.findMany({
+          where: this.recipientWhere(tenantId, announcement),
+          take: 5000,
+          select: { id: true, personalEmail: true },
+        });
+        const recipientIds = recipients.map((employee) => employee.id);
+        await tx.announcementEmailDelivery.deleteMany({
           where: {
-            announcementId_employeeId: {
-              announcementId: announcement.id,
-              employeeId: employee.id,
-            },
-          },
-          create: {
-            tenantId,
             announcementId: announcement.id,
-            employeeId: employee.id,
-            email: email ?? 'sin-correo@spulso.local',
-            status: email
-              ? EmailDeliveryStatus.PENDING
-              : EmailDeliveryStatus.SKIPPED,
-            subject: `[Comunicado] ${announcement.title}`,
-            errorMessage: email
-              ? null
-              : 'El trabajador no tiene correo personal registrado.',
-          },
-          update: {
-            email: email ?? 'sin-correo@spulso.local',
-            status: email
-              ? EmailDeliveryStatus.PENDING
-              : EmailDeliveryStatus.SKIPPED,
-            subject: `[Comunicado] ${announcement.title}`,
-            errorMessage: email
-              ? null
-              : 'El trabajador no tiene correo personal registrado.',
-            queuedAt: new Date(),
+            tenantId,
+            ...(recipientIds.length > 0
+              ? { employeeId: { notIn: recipientIds } }
+              : {}),
           },
         });
-      }),
+
+        const existing = await tx.announcementEmailDelivery.findMany({
+          where: { announcementId: announcement.id, tenantId },
+          select: { employeeId: true, status: true },
+        });
+        const statusByEmployee = new Map(
+          existing.map((delivery) => [delivery.employeeId, delivery.status]),
+        );
+
+        for (let index = 0; index < recipients.length; index += 50) {
+          const batch = recipients.slice(index, index + 50);
+          await Promise.all(
+            batch.map((employee) => {
+              const email = this.toOptionalString(employee.personalEmail);
+              const wasSent =
+                statusByEmployee.get(employee.id) === EmailDeliveryStatus.SENT;
+              return tx.announcementEmailDelivery.upsert({
+                where: {
+                  announcementId_employeeId: {
+                    announcementId: announcement.id,
+                    employeeId: employee.id,
+                  },
+                },
+                create: {
+                  tenantId,
+                  announcementId: announcement.id,
+                  employeeId: employee.id,
+                  email: email ?? 'sin-correo@spulso.local',
+                  status: email
+                    ? EmailDeliveryStatus.PENDING
+                    : EmailDeliveryStatus.SKIPPED,
+                  subject: `[Comunicado] ${announcement.title}`,
+                  errorMessage: email
+                    ? null
+                    : 'El trabajador no tiene correo personal registrado.',
+                },
+                update: {
+                  email: email ?? 'sin-correo@spulso.local',
+                  ...(wasSent
+                    ? {}
+                    : {
+                        status: email
+                          ? EmailDeliveryStatus.PENDING
+                          : EmailDeliveryStatus.SKIPPED,
+                        queuedAt: new Date(),
+                      }),
+                  subject: `[Comunicado] ${announcement.title}`,
+                  errorMessage: email
+                    ? null
+                    : 'El trabajador no tiene correo personal registrado.',
+                },
+              });
+            }),
+          );
+        }
+      },
+      {
+        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+        maxWait: 10_000,
+        timeout: 60_000,
+      },
     );
   }
 
@@ -1111,6 +1261,30 @@ export class AnnouncementsService {
         'Usa una imagen con URL https o una ruta interna /uploads/.',
       );
     }
+  }
+
+  private async assertAnnouncementImageBinding(
+    actor: AuthUser,
+    imageUrl: string | null,
+  ) {
+    if (!imageUrl || !imageUrl.startsWith('/uploads/')) return;
+    const expectedPrefix = `/uploads/comunicados/${actor.tenantId}--${actor.sub}--`;
+    if (imageUrl.startsWith(expectedPrefix)) return;
+
+    const owner = await this.prisma.announcement.findFirst({
+      where: { imageUrl, tenantId: actor.tenantId },
+      select: { id: true },
+    });
+    if (!owner) {
+      throw new BadRequestException(
+        'La imagen no pertenece a este espacio de trabajo.',
+      );
+    }
+    const announcement = await this.findAnnouncementOrThrow(
+      actor.tenantId,
+      owner.id,
+    );
+    this.assertAnnouncementVisible(actor, announcement);
   }
 
   private publicMediaUrl(value: string) {

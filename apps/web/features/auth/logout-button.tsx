@@ -10,7 +10,12 @@ export function LogoutButton({ redirectTo = "/login", showLabel = false }: { red
 
   async function handleLogout() {
     setIsLeaving(true);
-    await fetch("/api/auth/logout", { method: "POST" }).catch(() => null);
+    const response = await fetch("/api/auth/logout", { method: "POST" }).catch(() => null);
+    if (!response?.ok) {
+      window.alert(
+        "La sesión local se cerró, pero no se pudo confirmar la revocación en el servidor. Vuelve a iniciar sesión y reintenta el cierre.",
+      );
+    }
     router.replace(redirectTo);
     router.refresh();
   }

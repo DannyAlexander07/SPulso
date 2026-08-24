@@ -6,9 +6,15 @@ import {
   ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
+import { createHash } from 'node:crypto';
+import { PrismaService } from '../../database/prisma.service';
+import { AuditService } from '../audit/audit.service';
+import { assertCompanyAccess } from '../auth/access-scope';
+import type { AuthUser } from '../auth/jwt-auth.guard';
 
 const baseUrl = 'https://peruapi.com/api';
 const cacheTtlMs = 24 * 60 * 60 * 1000;
+const maxCacheEntries = 1000;
 
 type PeruApiResponse = {
   code?: string;
@@ -35,10 +41,39 @@ export class IdentityLookupService {
     string,
     { expiresAt: number; value: Record<string, unknown> }
   >();
+  private readonly lookupBudgets = new Map<
+    string,
+    { count: number; resetAt: number }
+  >();
 
-  async lookupDocument(documentNumber: string) {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly auditService: AuditService,
+  ) {}
+
+  async lookupDocument(
+    actor: AuthUser,
+    documentNumber: string,
+    requestedCompanyId?: string,
+  ) {
     const token = process.env.PERU_API_TOKEN?.trim();
     const numero = String(documentNumber ?? '').trim();
+    const companyId = String(requestedCompanyId ?? '').trim();
+
+    if (!companyId) {
+      throw new BadRequestException(
+        'Selecciona la empresa antes de consultar el documento.',
+      );
+    }
+    const company = await this.prisma.company.findFirst({
+      where: { id: companyId, tenantId: actor.tenantId },
+      select: { id: true },
+    });
+    if (!company) {
+      throw new BadRequestException('La empresa seleccionada no existe.');
+    }
+    assertCompanyAccess(actor, company.id);
+    this.consumeLookupBudget(actor);
 
     if (!token) {
       throw new InternalServerErrorException(
@@ -59,8 +94,10 @@ export class IdentityLookupService {
       );
     }
 
-    const cached = this.cache.get(numero);
+    const cacheKey = `${actor.tenantId}:${numero}`;
+    const cached = this.cache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) {
+      await this.auditLookup(actor, companyId, numero, isRuc, true);
       return cached.value;
     }
 
@@ -136,10 +173,8 @@ export class IdentityLookupService {
         tipo: 'RUC',
       };
 
-      this.cache.set(numero, {
-        expiresAt: Date.now() + cacheTtlMs,
-        value: result,
-      });
+      this.remember(cacheKey, result);
+      await this.auditLookup(actor, companyId, numero, true, false);
 
       return result;
     }
@@ -159,11 +194,66 @@ export class IdentityLookupService {
       ubigeo: data.ubigeo ?? '',
     };
 
-    this.cache.set(numero, {
-      expiresAt: Date.now() + cacheTtlMs,
-      value: result,
-    });
+    this.remember(cacheKey, result);
+    await this.auditLookup(actor, companyId, numero, false, false);
 
     return result;
+  }
+
+  private remember(key: string, value: Record<string, unknown>) {
+    const now = Date.now();
+    for (const [cachedKey, cached] of this.cache) {
+      if (cached.expiresAt <= now) this.cache.delete(cachedKey);
+    }
+
+    while (this.cache.size >= maxCacheEntries) {
+      const oldestKey = this.cache.keys().next().value as string | undefined;
+      if (!oldestKey) break;
+      this.cache.delete(oldestKey);
+    }
+
+    this.cache.set(key, { expiresAt: now + cacheTtlMs, value });
+  }
+
+  private consumeLookupBudget(actor: AuthUser) {
+    const now = Date.now();
+    for (const [key, budget] of this.lookupBudgets) {
+      if (budget.resetAt <= now) this.lookupBudgets.delete(key);
+    }
+    const key = `${actor.tenantId}:${actor.sub}`;
+    const current = this.lookupBudgets.get(key);
+    if (!current || current.resetAt <= now) {
+      this.lookupBudgets.set(key, { count: 1, resetAt: now + 60 * 60 * 1000 });
+      return;
+    }
+    current.count += 1;
+    if (current.count > 30) {
+      throw new ServiceUnavailableException(
+        'Alcanzaste el limite horario de consultas de identidad.',
+      );
+    }
+  }
+
+  private auditLookup(
+    actor: AuthUser,
+    companyId: string,
+    documentNumber: string,
+    isRuc: boolean,
+    cacheHit: boolean,
+  ) {
+    const documentFingerprint = createHash('sha256')
+      .update(`${actor.tenantId}:${documentNumber}`)
+      .digest('hex');
+    return this.auditService.write({
+      tenantId: actor.tenantId,
+      companyId,
+      actorType: 'user',
+      actorLabel: actor.email,
+      action: 'identity.document_lookup',
+      entityType: 'IdentityLookup',
+      entityId: documentFingerprint,
+      summary: `Se consulto un ${isRuc ? 'RUC' : 'DNI'} para un alta o actualizacion laboral.`,
+      after: { cacheHit, companyId, documentType: isRuc ? 'RUC' : 'DNI' },
+    });
   }
 }

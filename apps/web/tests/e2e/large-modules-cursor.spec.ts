@@ -182,7 +182,7 @@ test.describe("modulos grandes con cursor", () => {
     page,
   }) => {
     await ensureAdminSession(page);
-    await gotoAdminPage(page, "/notificaciones?estado=UNREAD");
+    await gotoAdminPage(page, "/notificaciones?estado=ALL");
 
     await expect(
       page.getByRole("heading", {

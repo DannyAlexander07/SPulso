@@ -14,6 +14,7 @@ const hopByHopHeaders = new Set([
   "transfer-encoding",
   "upgrade",
 ]);
+const maxMultipartBytes = 26 * 1024 * 1024;
 
 type RouteContext = {
   params: Promise<{
@@ -65,7 +66,26 @@ async function forwardToApi(request: NextRequest, context: RouteContext) {
 
   if (request.method !== "GET" && request.method !== "HEAD") {
     if (contentType?.includes("multipart/form-data")) {
-      init.body = await request.arrayBuffer();
+      const contentLength = Number(request.headers.get("content-length") ?? 0);
+
+      if (contentLength > maxMultipartBytes) {
+        return NextResponse.json(
+          { message: "El archivo excede el limite permitido." },
+          { status: 413 },
+        );
+      }
+
+      const authResponse = await fetch(`${API_URL}/auth/me`, {
+        cache: "no-store",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!authResponse.ok) {
+        return NextResponse.json({ message: "Sesion no valida." }, { status: 401 });
+      }
+
+      init.body = request.body;
+      (init as RequestInit & { duplex: "half" }).duplex = "half";
     } else {
       const body = await request.text();
       init.body = body.length > 0 ? body : undefined;

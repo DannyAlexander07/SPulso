@@ -25,10 +25,6 @@ export class AutomationsController {
     @Param('id') id: string,
     @Body() updateAutomationRuleDto: UpdateAutomationRuleDto,
   ) {
-    return this.automationsService.update(
-      user.tenantId,
-      id,
-      updateAutomationRuleDto,
-    );
+    return this.automationsService.update(user, id, updateAutomationRuleDto);
   }
 }

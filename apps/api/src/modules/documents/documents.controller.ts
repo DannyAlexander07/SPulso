@@ -126,7 +126,7 @@ export class DocumentsController {
   }
 
   @Get(['documentos/exportar/zip', 'documents/export/zip'])
-  @Permissions('documents.view')
+  @Permissions('documents.export')
   exportZip(
     @CurrentUser() user: AuthUser,
     @Res() response: Response,

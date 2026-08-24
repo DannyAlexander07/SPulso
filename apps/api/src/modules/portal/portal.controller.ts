@@ -91,9 +91,14 @@ export class PortalController {
           mkdirSync(userUploadRoot, { recursive: true });
           callback(null, userUploadRoot);
         },
-        filename: (_request, file, callback) => {
+        filename: (request, file, callback) => {
+          const user = (request as Request & { user?: AuthUser }).user;
+          if (!user?.tenantId || !user.sub) {
+            callback(new Error('Sesion requerida.'), '');
+            return;
+          }
           const extension = safeExtension(file.mimetype);
-          const name = `${Date.now()}-${randomSuffix()}${extension}`;
+          const name = `${user.tenantId}--${user.sub}--${Date.now()}-${randomSuffix()}${extension}`;
           callback(null, name);
         },
       }),
@@ -112,7 +117,10 @@ export class PortalController {
       },
     }),
   )
-  uploadProfileImage(@UploadedFile() file: Express.Multer.File | undefined) {
+  async uploadProfileImage(
+    @CurrentUser() user: AuthUser,
+    @UploadedFile() file: Express.Multer.File | undefined,
+  ) {
     if (!file) {
       throw new BadRequestException('Selecciona una imagen para subir.');
     }
@@ -124,12 +132,21 @@ export class PortalController {
       );
     }
 
-    return {
-      fileName: file.filename,
-      mimeType: file.mimetype,
-      size: file.size,
-      url: `/uploads/usuarios/${file.filename}`,
-    };
+    const url = `/uploads/usuarios/${file.filename}`;
+
+    try {
+      const result = await this.portalService.updateProfilePhoto(user, url);
+      return {
+        ...result,
+        fileName: file.filename,
+        mimeType: file.mimetype,
+        size: file.size,
+        url,
+      };
+    } catch (error) {
+      if (file.path) unlinkSync(file.path);
+      throw error;
+    }
   }
 
   @Patch(['portal/foto', 'portal/photo'])
@@ -137,10 +154,12 @@ export class PortalController {
     @CurrentUser() user: AuthUser,
     @Body() updatePhotoDto: { avatarUrl?: string | null },
   ) {
-    return this.portalService.updateProfilePhoto(
-      user,
-      updatePhotoDto.avatarUrl ?? null,
-    );
+    if (updatePhotoDto.avatarUrl) {
+      throw new BadRequestException(
+        'Las fotos nuevas deben cargarse mediante el endpoint seguro de archivos.',
+      );
+    }
+    return this.portalService.updateProfilePhoto(user, null);
   }
 }
 
