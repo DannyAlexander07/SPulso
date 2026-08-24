@@ -92,18 +92,17 @@ test("organizacion aprovecha el ancho disponible sin desplazarse a la derecha", 
   const workspace = page
     .getByRole("heading", { name: /Ordena personas en areas/i })
     .locator('xpath=ancestor::div[contains(@class, "pb-24")][1]');
-  const sidebar = page.locator("aside");
-  const [workspaceBox, sidebarBox] = await Promise.all([
+  const contentColumn = page.locator("main > div.grid > section").first();
+  const [workspaceBox, contentColumnBox] = await Promise.all([
     workspace.boundingBox(),
-    sidebar.boundingBox(),
+    contentColumn.boundingBox(),
   ]);
 
   expect(workspaceBox).not.toBeNull();
-  expect(sidebarBox).not.toBeNull();
+  expect(contentColumnBox).not.toBeNull();
 
-  const gapFromSidebar =
-    workspaceBox!.x - (sidebarBox!.x + sidebarBox!.width);
-  expect(gapFromSidebar).toBeLessThanOrEqual(1);
+  expect(workspaceBox!.x).toBe(contentColumnBox!.x);
+  expect(workspaceBox!.width).toBe(contentColumnBox!.width);
   expect(workspaceBox!.width).toBeGreaterThanOrEqual(1650);
 
   const hasHorizontalOverflow = await page.evaluate(
