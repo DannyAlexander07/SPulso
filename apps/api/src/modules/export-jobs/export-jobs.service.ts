@@ -130,100 +130,88 @@ export class ExportJobsService {
     const filters = this.normalizeFilters(dto?.filters);
     const companyId = this.resolveCompanyScope(actor, filters);
 
-    const job = await (async () => {
-      try {
-        return await this.prisma.$transaction(
-          async (tx) => {
-            const activeStatuses = [
-              ExportJobStatus.PENDING,
-              ExportJobStatus.PROCESSING,
-            ];
-            const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
-            const [tenantActive, userActive, tenantDaily, userDaily, userJobs] =
-              await Promise.all([
-                tx.exportJob.count({
-                  where: {
-                    tenantId: actor.tenantId,
-                    status: { in: activeStatuses },
-                  },
-                }),
-                tx.exportJob.count({
-                  where: {
-                    requestedById: actor.sub,
-                    status: { in: activeStatuses },
-                  },
-                }),
-                tx.exportJob.count({
-                  where: {
-                    createdAt: { gte: since },
-                    tenantId: actor.tenantId,
-                  },
-                }),
-                tx.exportJob.count({
-                  where: {
-                    createdAt: { gte: since },
-                    requestedById: actor.sub,
-                  },
-                }),
-                tx.exportJob.findMany({
-                  where: {
-                    requestedById: actor.sub,
-                    status: { in: activeStatuses },
-                  },
-                  select: { companyId: true, filters: true, type: true },
-                }),
-              ]);
+    const job = await this.retrySerializableTransaction(() =>
+      this.prisma.$transaction(
+        async (tx) => {
+          const activeStatuses = [
+            ExportJobStatus.PENDING,
+            ExportJobStatus.PROCESSING,
+          ];
+          const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+          const [tenantActive, userActive, tenantDaily, userDaily, userJobs] =
+            await Promise.all([
+              tx.exportJob.count({
+                where: {
+                  tenantId: actor.tenantId,
+                  status: { in: activeStatuses },
+                },
+              }),
+              tx.exportJob.count({
+                where: {
+                  requestedById: actor.sub,
+                  status: { in: activeStatuses },
+                },
+              }),
+              tx.exportJob.count({
+                where: {
+                  createdAt: { gte: since },
+                  tenantId: actor.tenantId,
+                },
+              }),
+              tx.exportJob.count({
+                where: {
+                  createdAt: { gte: since },
+                  requestedById: actor.sub,
+                },
+              }),
+              tx.exportJob.findMany({
+                where: {
+                  requestedById: actor.sub,
+                  status: { in: activeStatuses },
+                },
+                select: { companyId: true, filters: true, type: true },
+              }),
+            ]);
 
-            if (
-              tenantActive >= MAX_ACTIVE_EXPORTS_PER_TENANT ||
-              userActive >= MAX_ACTIVE_EXPORTS_PER_USER ||
-              tenantDaily >= MAX_DAILY_EXPORTS_PER_TENANT ||
-              userDaily >= MAX_DAILY_EXPORTS_PER_USER
-            ) {
-              throw new BadRequestException(
-                'Ya hay varias exportaciones en proceso. Espera a que terminen antes de crear otra.',
-              );
-            }
+          if (
+            tenantActive >= MAX_ACTIVE_EXPORTS_PER_TENANT ||
+            userActive >= MAX_ACTIVE_EXPORTS_PER_USER ||
+            tenantDaily >= MAX_DAILY_EXPORTS_PER_TENANT ||
+            userDaily >= MAX_DAILY_EXPORTS_PER_USER
+          ) {
+            throw new BadRequestException(
+              'Ya hay varias exportaciones en proceso. Espera a que terminen antes de crear otra.',
+            );
+          }
 
-            if (
-              userJobs.some(
-                (existing) =>
-                  existing.type === type &&
-                  existing.companyId === companyId &&
-                  this.canonicalJson(existing.filters ?? {}) ===
-                    this.canonicalJson(filters),
-              )
-            ) {
-              throw new BadRequestException(
-                'Ya existe una exportacion equivalente pendiente o en proceso.',
-              );
-            }
+          if (
+            userJobs.some(
+              (existing) =>
+                existing.type === type &&
+                existing.companyId === companyId &&
+                this.canonicalJson(existing.filters ?? {}) ===
+                  this.canonicalJson(filters),
+            )
+          ) {
+            throw new BadRequestException(
+              'Ya existe una exportacion equivalente pendiente o en proceso.',
+            );
+          }
 
-            return tx.exportJob.create({
-              data: {
-                tenantId: actor.tenantId,
-                companyId,
-                requestedById: actor.sub,
-                type,
-                filters: this.toJson(filters),
-              },
-              select: this.exportJobSelect(),
-            });
-          },
-          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
-        );
-      } catch (error) {
-        if (
-          error instanceof Prisma.PrismaClientKnownRequestError &&
-          error.code === 'P2034'
-        ) {
-          throw new BadRequestException(
-            'Otra exportacion se creo al mismo tiempo. Reintenta en unos segundos.',
-          );
-        }
-        throw error;
-      }
-    })();
+          return tx.exportJob.create({
+            data: {
+              tenantId: actor.tenantId,
+              companyId,
+              requestedById: actor.sub,
+              type,
+              filters: this.toJson(filters),
+            },
+            select: this.exportJobSelect(),
+          });
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      ),
+    );
 
     await this.auditService.write({
       tenantId: actor.tenantId,
@@ -238,6 +226,51 @@ export class ExportJobsService {
     });
 
     return job;
+  }
+
+  private async retrySerializableTransaction<T>(
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    const maxAttempts = 5;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        return await operation();
+      } catch (error) {
+        if (!this.isTransactionWriteConflict(error)) {
+          throw error;
+        }
+        if (attempt === maxAttempts) {
+          throw new BadRequestException(
+            'Otra exportacion se creo al mismo tiempo. Reintenta en unos segundos.',
+          );
+        }
+        await new Promise((resolve) => setTimeout(resolve, attempt * 25));
+      }
+    }
+
+    throw new BadRequestException(
+      'Otra exportacion se creo al mismo tiempo. Reintenta en unos segundos.',
+    );
+  }
+
+  private isTransactionWriteConflict(error: unknown) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === 'P2034'
+    ) {
+      return true;
+    }
+
+    const adapterError = error as {
+      cause?: { originalCode?: unknown };
+      code?: unknown;
+    };
+
+    return (
+      adapterError?.code === 'P2034' ||
+      adapterError?.cause?.originalCode === '40001'
+    );
   }
 
   async getDownload(actor: AuthUser, id: string) {

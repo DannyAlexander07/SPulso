@@ -39,12 +39,11 @@ async function main() {
     const token = await login(app);
     const startedAt = Date.now();
     const listTimings = await timeListEndpoints(app, token);
-    const createdJobs = await createJobs(app, token, jobMultiplier);
-    const completedJobs = await waitForJobs(
+    const completedJobs = await createAndCompleteJobs(
       app,
       token,
       exportJobsService,
-      createdJobs,
+      jobMultiplier,
     );
     const totalMs = Date.now() - startedAt;
     const p95Ms = percentile(
@@ -107,9 +106,10 @@ async function timeListEndpoints(app: INestApplication<App>, token: string) {
   );
 }
 
-async function createJobs(
+async function createAndCompleteJobs(
   app: INestApplication<App>,
   token: string,
+  exportJobsService: ExportJobsService,
   multiplier: number,
 ) {
   const payloads = Array.from({ length: multiplier }).flatMap(() =>
@@ -118,18 +118,24 @@ async function createJobs(
       type,
     })),
   );
+  const completed: ExportJobBody[] = [];
 
-  const responses = await Promise.all(
-    payloads.map((payload) =>
-      request(app.getHttpServer())
-        .post('/exportaciones')
-        .set('Authorization', `Bearer ${token}`)
-        .send(payload)
-        .expect(201),
-    ),
-  );
+  for (let index = 0; index < payloads.length; index += 3) {
+    const batch = payloads.slice(index, index + 3);
+    const responses = await Promise.all(
+      batch.map((payload) =>
+        request(app.getHttpServer())
+          .post('/exportaciones')
+          .set('Authorization', `Bearer ${token}`)
+          .send(payload)
+          .expect(201),
+      ),
+    );
+    const jobs = responses.map((response) => response.body as ExportJobBody);
+    completed.push(...(await waitForJobs(app, token, exportJobsService, jobs)));
+  }
 
-  return responses.map((response) => response.body as ExportJobBody);
+  return completed;
 }
 
 async function waitForJobs(
