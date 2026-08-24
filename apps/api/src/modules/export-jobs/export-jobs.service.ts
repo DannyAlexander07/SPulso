@@ -133,45 +133,50 @@ export class ExportJobsService {
     const job = await this.retrySerializableTransaction(() =>
       this.prisma.$transaction(
         async (tx) => {
-          const activeStatuses = [
+          const activeStatuses: ExportJobStatus[] = [
             ExportJobStatus.PENDING,
             ExportJobStatus.PROCESSING,
           ];
           const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
-          const [tenantActive, userActive, tenantDaily, userDaily, userJobs] =
-            await Promise.all([
-              tx.exportJob.count({
-                where: {
-                  tenantId: actor.tenantId,
-                  status: { in: activeStatuses },
-                },
-              }),
-              tx.exportJob.count({
-                where: {
-                  requestedById: actor.sub,
-                  status: { in: activeStatuses },
-                },
-              }),
-              tx.exportJob.count({
-                where: {
-                  createdAt: { gte: since },
-                  tenantId: actor.tenantId,
-                },
-              }),
-              tx.exportJob.count({
-                where: {
-                  createdAt: { gte: since },
-                  requestedById: actor.sub,
-                },
-              }),
-              tx.exportJob.findMany({
-                where: {
-                  requestedById: actor.sub,
-                  status: { in: activeStatuses },
-                },
-                select: { companyId: true, filters: true, type: true },
-              }),
-            ]);
+          // Interactive transactions use one PostgreSQL connection. Running
+          // queries in Promise.all on that connection is deprecated by pg and
+          // will stop being supported in pg 9. Read the bounded quota window
+          // once and derive every counter from the same serializable snapshot.
+          const tenantJobs = await tx.exportJob.findMany({
+            where: {
+              tenantId: actor.tenantId,
+              OR: [
+                { status: { in: activeStatuses } },
+                { createdAt: { gte: since } },
+              ],
+            },
+            select: {
+              companyId: true,
+              createdAt: true,
+              filters: true,
+              requestedById: true,
+              status: true,
+              type: true,
+            },
+          });
+          const isActive = (status: ExportJobStatus) =>
+            activeStatuses.includes(status);
+          const tenantActive = tenantJobs.filter((item) =>
+            isActive(item.status),
+          ).length;
+          const userActive = tenantJobs.filter(
+            (item) => item.requestedById === actor.sub && isActive(item.status),
+          ).length;
+          const tenantDaily = tenantJobs.filter(
+            (item) => item.createdAt >= since,
+          ).length;
+          const userDaily = tenantJobs.filter(
+            (item) =>
+              item.requestedById === actor.sub && item.createdAt >= since,
+          ).length;
+          const userJobs = tenantJobs.filter(
+            (item) => item.requestedById === actor.sub && isActive(item.status),
+          );
 
           if (
             tenantActive >= MAX_ACTIVE_EXPORTS_PER_TENANT ||
@@ -209,7 +214,11 @@ export class ExportJobsService {
             select: this.exportJobSelect(),
           });
         },
-        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+        {
+          isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+          maxWait: 15_000,
+          timeout: 15_000,
+        },
       ),
     );
 

@@ -280,10 +280,7 @@ export class AnnouncementsService {
         employeeIds,
       );
 
-      return tx.announcement.findUniqueOrThrow({
-        where: { id: created.id },
-        select: this.announcementSelect(),
-      });
+      return this.readAnnouncementSnapshot(tx, tenantId, created.id);
     });
 
     await this.auditService.write({
@@ -436,10 +433,7 @@ export class AnnouncementsService {
         );
       }
 
-      return tx.announcement.findUniqueOrThrow({
-        where: { id: current.id },
-        select: this.announcementSelect(),
-      });
+      return this.readAnnouncementSnapshot(tx, tenantId, current.id);
     });
 
     await this.auditService.write({
@@ -544,19 +538,7 @@ export class AnnouncementsService {
 
   private announcementSelect() {
     return {
-      id: true,
-      title: true,
-      message: true,
-      imageUrl: true,
-      status: true,
-      priority: true,
-      audienceScope: true,
-      publishAt: true,
-      expiresAt: true,
-      sendEmail: true,
-      isPinned: true,
-      createdAt: true,
-      updatedAt: true,
+      ...this.announcementScalarSelect(),
       audiences: {
         select: {
           id: true,
@@ -581,6 +563,111 @@ export class AnnouncementsService {
         },
       },
     };
+  }
+
+  private announcementScalarSelect() {
+    return {
+      id: true,
+      title: true,
+      message: true,
+      imageUrl: true,
+      status: true,
+      priority: true,
+      audienceScope: true,
+      publishAt: true,
+      expiresAt: true,
+      sendEmail: true,
+      isPinned: true,
+      createdAt: true,
+      updatedAt: true,
+    };
+  }
+
+  private async readAnnouncementSnapshot(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    announcementId: string,
+  ): Promise<AnnouncementRecord> {
+    const announcement = await tx.announcement.findFirst({
+      where: { id: announcementId, tenantId },
+      select: this.announcementScalarSelect(),
+    });
+    if (!announcement) {
+      throw new ConflictException(
+        'El comunicado cambio mientras se guardaba. Intenta nuevamente.',
+      );
+    }
+
+    const links = await tx.announcementAudience.findMany({
+      where: { announcementId, tenantId },
+      select: { id: true, companyId: true, teamId: true, employeeId: true },
+    });
+    const teamIds = links.flatMap((link) => (link.teamId ? [link.teamId] : []));
+    const employeeIds = links.flatMap((link) =>
+      link.employeeId ? [link.employeeId] : [],
+    );
+    const teams = await tx.workTeam.findMany({
+      where: { id: { in: teamIds }, tenantId },
+      select: { id: true, name: true, slug: true, companyId: true },
+    });
+    const employees = await tx.employee.findMany({
+      where: { id: { in: employeeIds }, tenantId },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        jobTitle: true,
+        companyId: true,
+      },
+    });
+    const companyIds = [
+      ...links.flatMap((link) => (link.companyId ? [link.companyId] : [])),
+      ...teams.map((team) => team.companyId),
+      ...employees.map((employee) => employee.companyId),
+    ];
+    const companies = await tx.company.findMany({
+      where: { id: { in: [...new Set(companyIds)] }, tenantId },
+      select: { id: true, name: true, slug: true },
+    });
+    const companyById = new Map(
+      companies.map((company) => [company.id, company]),
+    );
+    const teamById = new Map(teams.map((team) => [team.id, team]));
+    const employeeById = new Map(
+      employees.map((employee) => [employee.id, employee]),
+    );
+
+    const audiences: AnnouncementRecord['audiences'] = links.map((link) => {
+      const team = link.teamId ? teamById.get(link.teamId) : undefined;
+      const employee = link.employeeId
+        ? employeeById.get(link.employeeId)
+        : undefined;
+      const company = link.companyId
+        ? companyById.get(link.companyId)
+        : undefined;
+      if (
+        (link.companyId && !company) ||
+        (link.teamId && (!team || !companyById.has(team.companyId))) ||
+        (link.employeeId && (!employee || !companyById.has(employee.companyId)))
+      ) {
+        throw new ConflictException(
+          'La audiencia cambio mientras se guardaba el comunicado.',
+        );
+      }
+
+      return {
+        id: link.id,
+        company: company ?? null,
+        team: team
+          ? { ...team, company: companyById.get(team.companyId)! }
+          : null,
+        employee: employee
+          ? { ...employee, company: companyById.get(employee.companyId)! }
+          : null,
+      };
+    });
+
+    return { ...announcement, audiences };
   }
 
   private async findAnnouncementOrThrow(tenantId: string, id: string) {
@@ -764,51 +851,40 @@ export class AnnouncementsService {
           existing.map((delivery) => [delivery.employeeId, delivery.status]),
         );
 
-        for (let index = 0; index < recipients.length; index += 50) {
-          const batch = recipients.slice(index, index + 50);
-          await Promise.all(
-            batch.map((employee) => {
+        // Keep sent deliveries immutable as historical evidence. Rebuild every
+        // unsent delivery in two bulk statements so one transaction never runs
+        // concurrent client.query calls and large audiences remain bounded.
+        await tx.announcementEmailDelivery.deleteMany({
+          where: {
+            announcementId: announcement.id,
+            tenantId,
+            status: { not: EmailDeliveryStatus.SENT },
+          },
+        });
+
+        const pendingRecipients = recipients.filter(
+          (employee) =>
+            statusByEmployee.get(employee.id) !== EmailDeliveryStatus.SENT,
+        );
+        if (pendingRecipients.length > 0) {
+          await tx.announcementEmailDelivery.createMany({
+            data: pendingRecipients.map((employee) => {
               const email = this.toOptionalString(employee.personalEmail);
-              const wasSent =
-                statusByEmployee.get(employee.id) === EmailDeliveryStatus.SENT;
-              return tx.announcementEmailDelivery.upsert({
-                where: {
-                  announcementId_employeeId: {
-                    announcementId: announcement.id,
-                    employeeId: employee.id,
-                  },
-                },
-                create: {
-                  tenantId,
-                  announcementId: announcement.id,
-                  employeeId: employee.id,
-                  email: email ?? 'sin-correo@spulso.local',
-                  status: email
-                    ? EmailDeliveryStatus.PENDING
-                    : EmailDeliveryStatus.SKIPPED,
-                  subject: `[Comunicado] ${announcement.title}`,
-                  errorMessage: email
-                    ? null
-                    : 'El trabajador no tiene correo personal registrado.',
-                },
-                update: {
-                  email: email ?? 'sin-correo@spulso.local',
-                  ...(wasSent
-                    ? {}
-                    : {
-                        status: email
-                          ? EmailDeliveryStatus.PENDING
-                          : EmailDeliveryStatus.SKIPPED,
-                        queuedAt: new Date(),
-                      }),
-                  subject: `[Comunicado] ${announcement.title}`,
-                  errorMessage: email
-                    ? null
-                    : 'El trabajador no tiene correo personal registrado.',
-                },
-              });
+              return {
+                tenantId,
+                announcementId: announcement.id,
+                employeeId: employee.id,
+                email: email ?? 'sin-correo@spulso.local',
+                status: email
+                  ? EmailDeliveryStatus.PENDING
+                  : EmailDeliveryStatus.SKIPPED,
+                subject: `[Comunicado] ${announcement.title}`,
+                errorMessage: email
+                  ? null
+                  : 'El trabajador no tiene correo personal registrado.',
+              };
             }),
-          );
+          });
         }
       },
       {

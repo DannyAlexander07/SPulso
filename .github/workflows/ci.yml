@@ -43,6 +43,7 @@ jobs:
       FORM_BODY_LIMIT: 64kb
       JSON_BODY_LIMIT: 256kb
       JWT_SECRET: spulso-ci-secret-change-in-deployments
+      NODE_OPTIONS: --throw-deprecation
       PORT: 3001
       TZ: America/Lima
       TRUST_PROXY_HOPS: 0
@@ -123,6 +124,7 @@ jobs:
       JSON_BODY_LIMIT: 256kb
       JWT_SECRET: spulso-ci-secret-change-in-deployments
       NEXT_PUBLIC_API_URL: http://localhost:3001
+      NODE_OPTIONS: --throw-deprecation
       TZ: America/Lima
       TRUST_PROXY_HOPS: 0
       WEB_URL: http://localhost:3000

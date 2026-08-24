@@ -493,6 +493,7 @@ export class DocumentsService {
         status: true,
         firstName: true,
         lastName: true,
+        jobTitle: true,
       },
     });
 
@@ -511,14 +512,35 @@ export class DocumentsService {
       assertCompanyAccess(actor, employee.companyId);
     }
 
+    const companies = await this.prisma.company.findMany({
+      where: {
+        id: {
+          in: [...new Set(employees.map((employee) => employee.companyId))],
+        },
+        tenantId,
+      },
+      select: { id: true, name: true, slug: true },
+    });
+    const companyById = new Map(
+      companies.map((company) => [company.id, company]),
+    );
+
     const issuedAt = this.parseOptionalDate(createDocumentDto.issuedAt);
     const expiresAt = this.parseOptionalDate(createDocumentDto.expiresAt);
     const normalizedFolder =
       folder?.name ?? this.normalizeFolder(createDocumentDto.folder);
 
-    const createdDocuments = await this.prisma.$transaction(
-      employees.map((employee) =>
-        this.prisma.employeeDocument.create({
+    const createdDocuments = await this.prisma.$transaction(async (tx) => {
+      const createForEmployee = async (
+        employee: (typeof employees)[number],
+      ) => {
+        const company = companyById.get(employee.companyId);
+        if (!company) {
+          throw new BadRequestException(
+            'La empresa del trabajador seleccionado no existe.',
+          );
+        }
+        const created = await tx.employeeDocument.create({
           data: {
             tenantId: employee.tenantId,
             companyId: employee.companyId,
@@ -543,10 +565,47 @@ export class DocumentsService {
             issuedAt,
             expiresAt,
           },
-          select: this.documentSelect(),
-        }),
-      ),
-    );
+          select: this.documentScalarSelect(),
+        });
+
+        return {
+          ...created,
+          folderRef: folder
+            ? {
+                id: folder.id,
+                name: folder.name,
+                slug: folder.slug,
+                visibleToEmployee: folder.visibleToEmployee,
+                requiresSignature: folder.requiresSignature,
+              }
+            : null,
+          employee: {
+            id: employee.id,
+            firstName: employee.firstName,
+            lastName: employee.lastName,
+            jobTitle: employee.jobTitle,
+          },
+          company,
+        };
+      };
+
+      const firstEmployee = employees[0];
+      if (!firstEmployee) {
+        throw new BadRequestException(
+          'Selecciona al menos un trabajador para asignar el documento.',
+        );
+      }
+      const documents = [await createForEmployee(firstEmployee)];
+
+      // The pg adapter executes batch transaction entries on one client. That
+      // concurrent client.query pattern is deprecated and will be rejected by
+      // pg 9, so preserve atomicity while creating each assignment in order.
+      for (const employee of employees.slice(1)) {
+        documents.push(await createForEmployee(employee));
+      }
+
+      return documents;
+    });
 
     for (const document of createdDocuments) {
       await this.auditService.write({
@@ -992,6 +1051,36 @@ export class DocumentsService {
 
   private documentSelect() {
     return {
+      ...this.documentScalarSelect(),
+      folderRef: {
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+          visibleToEmployee: true,
+          requiresSignature: true,
+        },
+      },
+      employee: {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          jobTitle: true,
+        },
+      },
+      company: {
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+        },
+      },
+    };
+  }
+
+  private documentScalarSelect() {
+    return {
       id: true,
       type: true,
       status: true,
@@ -1012,32 +1101,8 @@ export class DocumentsService {
       mimeType: true,
       fileSize: true,
       notes: true,
-      folderRef: {
-        select: {
-          id: true,
-          name: true,
-          slug: true,
-          visibleToEmployee: true,
-          requiresSignature: true,
-        },
-      },
       createdAt: true,
       updatedAt: true,
-      employee: {
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-          jobTitle: true,
-        },
-      },
-      company: {
-        select: {
-          id: true,
-          name: true,
-          slug: true,
-        },
-      },
     };
   }
 

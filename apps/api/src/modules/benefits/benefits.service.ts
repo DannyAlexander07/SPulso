@@ -6,6 +6,33 @@ import { hasGlobalCompanyAccess } from '../auth/access-scope';
 import type { AuthUser } from '../auth/jwt-auth.guard';
 import type { CreateBenefitDto, UpdateBenefitDto } from './dto/benefit.dto';
 
+type BenefitRecord = {
+  id: string;
+  title: string;
+  category: string;
+  description: string;
+  status: BenefitStatus;
+  audienceScope: BenefitAudienceScope;
+  startsAt: Date | null;
+  endsAt: Date | null;
+  actionLabel: string | null;
+  actionUrl: string | null;
+  imageUrl: string | null;
+  isHighlighted: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+  audiences: Array<{
+    id: string;
+    company: { id: string; name: string; slug: string } | null;
+    team: {
+      id: string;
+      name: string;
+      slug: string;
+      company: { id: string; name: string; slug: string };
+    } | null;
+  }>;
+};
+
 @Injectable()
 export class BenefitsService {
   constructor(
@@ -143,10 +170,7 @@ export class BenefitsService {
         teamIds,
       );
 
-      return tx.benefit.findUniqueOrThrow({
-        where: { id: created.id },
-        select: this.benefitSelect(),
-      });
+      return this.readBenefitSnapshot(tx, tenantId, created.id);
     });
 
     await this.auditService.write({
@@ -300,10 +324,7 @@ export class BenefitsService {
         );
       }
 
-      return tx.benefit.findUniqueOrThrow({
-        where: { id: current.id },
-        select: this.benefitSelect(),
-      });
+      return this.readBenefitSnapshot(tx, tenantId, current.id);
     });
 
     await this.auditService.write({
@@ -323,20 +344,7 @@ export class BenefitsService {
 
   private benefitSelect() {
     return {
-      id: true,
-      title: true,
-      category: true,
-      description: true,
-      status: true,
-      audienceScope: true,
-      startsAt: true,
-      endsAt: true,
-      actionLabel: true,
-      actionUrl: true,
-      imageUrl: true,
-      isHighlighted: true,
-      createdAt: true,
-      updatedAt: true,
+      ...this.benefitScalarSelect(),
       audiences: {
         select: {
           id: true,
@@ -352,6 +360,85 @@ export class BenefitsService {
         },
       },
     };
+  }
+
+  private benefitScalarSelect() {
+    return {
+      id: true,
+      title: true,
+      category: true,
+      description: true,
+      status: true,
+      audienceScope: true,
+      startsAt: true,
+      endsAt: true,
+      actionLabel: true,
+      actionUrl: true,
+      imageUrl: true,
+      isHighlighted: true,
+      createdAt: true,
+      updatedAt: true,
+    };
+  }
+
+  private async readBenefitSnapshot(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    benefitId: string,
+  ): Promise<BenefitRecord> {
+    const benefit = await tx.benefit.findFirst({
+      where: { id: benefitId, tenantId },
+      select: this.benefitScalarSelect(),
+    });
+    if (!benefit) {
+      throw new BadRequestException(
+        'El beneficio cambio mientras se guardaba. Intenta nuevamente.',
+      );
+    }
+    const links = await tx.benefitAudience.findMany({
+      where: { benefitId, tenantId },
+      select: { id: true, companyId: true, teamId: true },
+    });
+    const teamIds = links.flatMap((link) => (link.teamId ? [link.teamId] : []));
+    const teams = await tx.workTeam.findMany({
+      where: { id: { in: teamIds }, tenantId },
+      select: { id: true, name: true, slug: true, companyId: true },
+    });
+    const companyIds = [
+      ...links.flatMap((link) => (link.companyId ? [link.companyId] : [])),
+      ...teams.map((team) => team.companyId),
+    ];
+    const companies = await tx.company.findMany({
+      where: { id: { in: [...new Set(companyIds)] }, tenantId },
+      select: { id: true, name: true, slug: true },
+    });
+    const companyById = new Map(
+      companies.map((company) => [company.id, company]),
+    );
+    const teamById = new Map(teams.map((team) => [team.id, team]));
+    const audiences: BenefitRecord['audiences'] = links.map((link) => {
+      const team = link.teamId ? teamById.get(link.teamId) : undefined;
+      const company = link.companyId
+        ? companyById.get(link.companyId)
+        : undefined;
+      if (
+        (link.companyId && !company) ||
+        (link.teamId && (!team || !companyById.has(team.companyId)))
+      ) {
+        throw new BadRequestException(
+          'La audiencia cambio mientras se guardaba el beneficio.',
+        );
+      }
+      return {
+        id: link.id,
+        company: company ?? null,
+        team: team
+          ? { ...team, company: companyById.get(team.companyId)! }
+          : null,
+      };
+    });
+
+    return { ...benefit, audiences };
   }
 
   private async findBenefitOrThrow(tenantId: string, id: string) {

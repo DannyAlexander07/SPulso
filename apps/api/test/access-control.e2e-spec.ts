@@ -326,6 +326,105 @@ describe('Accesos y seguridad basica (e2e)', () => {
     expect(Array.isArray(employeesBody.data)).toBe(true);
   });
 
+  it('conserva snapshots transaccionales y prepara correos sin consultas concurrentes', async () => {
+    const announcementTitle = `Comunicado transaccional ${Date.now()}`;
+    const announcement = await request(app.getHttpServer())
+      .post('/comunicados')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        audienceScope: 'ALL',
+        message: 'Prueba de snapshot y preparacion masiva de destinatarios.',
+        sendEmail: true,
+        status: 'PUBLISHED',
+        title: announcementTitle,
+      })
+      .expect(201);
+    const announcementBody = announcement.body as IdBody;
+    const updatedAnnouncementTitle = `${announcementTitle} actualizado`;
+
+    await request(app.getHttpServer())
+      .patch(`/comunicados/${announcementBody.id}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ title: updatedAnnouncementTitle })
+      .expect(200);
+
+    const announcementAudit = await prisma.auditLog.findFirstOrThrow({
+      where: {
+        action: 'announcement.updated',
+        entityId: announcementBody.id,
+      },
+      orderBy: { createdAt: 'desc' },
+      select: { after: true },
+    });
+    expect((announcementAudit.after as { title?: string } | null)?.title).toBe(
+      updatedAnnouncementTitle,
+    );
+
+    const deliveries = await prisma.announcementEmailDelivery.findMany({
+      where: { announcementId: announcementBody.id },
+      select: { status: true, subject: true },
+    });
+    expect(deliveries.length).toBeGreaterThan(0);
+    expect(
+      deliveries
+        .filter((delivery) => delivery.status !== 'SENT')
+        .every(
+          (delivery) =>
+            delivery.subject === `[Comunicado] ${updatedAnnouncementTitle}`,
+        ),
+    ).toBe(true);
+
+    const benefitTitle = `Beneficio transaccional ${Date.now()}`;
+    const benefit = await request(app.getHttpServer())
+      .post('/beneficios')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        audienceScope: 'ALL',
+        category: 'Bienestar',
+        description: 'Prueba de snapshot transaccional del beneficio.',
+        title: benefitTitle,
+      })
+      .expect(201);
+    const benefitBody = benefit.body as IdBody;
+    const updatedBenefitTitle = `${benefitTitle} actualizado`;
+
+    await request(app.getHttpServer())
+      .patch(`/beneficios/${benefitBody.id}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ title: updatedBenefitTitle })
+      .expect(200);
+
+    const benefitAudit = await prisma.auditLog.findFirstOrThrow({
+      where: { action: 'benefit.updated', entityId: benefitBody.id },
+      orderBy: { createdAt: 'desc' },
+      select: { after: true },
+    });
+    expect((benefitAudit.after as { title?: string } | null)?.title).toBe(
+      updatedBenefitTitle,
+    );
+
+    const profile = await request(app.getHttpServer())
+      .get('/portal/perfil')
+      .set('Authorization', `Bearer ${workerToken}`)
+      .expect(200);
+    const employeeId = (profile.body as PortalProfileBody).employee.id;
+    const documentTitle = `Documento transaccional ${Date.now()}`;
+    const document = await request(app.getHttpServer())
+      .post('/documentos')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ employeeId, title: documentTitle })
+      .expect(201);
+    const documentBody = document.body as IdBody;
+    const documentAudit = await prisma.auditLog.findFirstOrThrow({
+      where: { action: 'document.created', entityId: documentBody.id },
+      orderBy: { createdAt: 'desc' },
+      select: { after: true },
+    });
+    expect((documentAudit.after as { title?: string } | null)?.title).toBe(
+      documentTitle,
+    );
+  });
+
   it('permite al trabajador entrar a su portal', async () => {
     const response = await request(app.getHttpServer())
       .get('/portal/perfil')
