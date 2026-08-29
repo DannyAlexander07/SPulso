@@ -7,5 +7,6 @@ Type=oneshot
 ExecStart=/usr/local/sbin/spulso-health-check
 PrivateTmp=true
 ProtectSystem=strict
-ReadWritePaths=/var/lib/spulso-monitor
+StateDirectory=spulso-monitor
+StateDirectoryMode=0700
 NoNewPrivileges=true
