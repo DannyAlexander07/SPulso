@@ -208,6 +208,13 @@ export class EmployeesService {
     const documentNumber = this.normalizeOptionalDocumentNumber(
       createEmployeeDto.documentNumber,
     );
+    const personalEmail = this.normalizeOptionalEmail(
+      createEmployeeDto.personalEmail,
+    );
+    const phoneMobile = this.normalizeOptionalPhone(
+      createEmployeeDto.phoneMobile,
+    );
+    const address = this.normalizeOptionalLabel(createEmployeeDto.address, 240);
     const attendancePin = this.normalizeAttendancePin(
       createEmployeeDto.attendancePin,
     );
@@ -218,6 +225,7 @@ export class EmployeesService {
     }
 
     await this.assertUniqueDocumentNumber(tenantId, documentNumber);
+    await this.assertUniquePersonalEmail(tenantId, personalEmail);
 
     if (employeeCode) {
       const existingEmployee = await this.prisma.employee.findUnique({
@@ -248,6 +256,9 @@ export class EmployeesService {
         firstName,
         lastName,
         documentNumber,
+        personalEmail,
+        phoneMobile,
+        address,
         employeeCode,
         attendancePinHash: await bcrypt.hash(attendancePin, 10),
         attendancePinChangeRequired: true,
@@ -569,6 +580,18 @@ export class EmployeesService {
     const managerId = this.toOptionalString(updateEmployeeDto.managerId);
     const firstName = this.toOptionalString(updateEmployeeDto.firstName);
     const lastName = this.toOptionalString(updateEmployeeDto.lastName);
+    const personalEmail =
+      updateEmployeeDto.personalEmail !== undefined
+        ? this.normalizeOptionalEmail(updateEmployeeDto.personalEmail)
+        : undefined;
+    const phoneMobile =
+      updateEmployeeDto.phoneMobile !== undefined
+        ? this.normalizeOptionalPhone(updateEmployeeDto.phoneMobile)
+        : undefined;
+    const address =
+      updateEmployeeDto.address !== undefined
+        ? this.normalizeOptionalLabel(updateEmployeeDto.address, 240)
+        : undefined;
     const status = this.normalizeOptionalEmployeeStatus(
       updateEmployeeDto.status,
     );
@@ -696,6 +719,14 @@ export class EmployeesService {
       );
     }
 
+    if (updateEmployeeDto.personalEmail !== undefined) {
+      await this.assertUniquePersonalEmail(
+        tenantId,
+        personalEmail ?? null,
+        employee.id,
+      );
+    }
+
     const updatedEmployee = await this.prisma.employee.update({
       where: { id: employee.id },
       data: {
@@ -708,6 +739,15 @@ export class EmployeesService {
         ...(lastName ? { lastName } : {}),
         ...(updateEmployeeDto.documentNumber !== undefined
           ? { documentNumber: documentNumber ?? null }
+          : {}),
+        ...(updateEmployeeDto.personalEmail !== undefined
+          ? { personalEmail: personalEmail ?? null }
+          : {}),
+        ...(updateEmployeeDto.phoneMobile !== undefined
+          ? { phoneMobile: phoneMobile ?? null }
+          : {}),
+        ...(updateEmployeeDto.address !== undefined
+          ? { address: address ?? null }
           : {}),
         ...(updateEmployeeDto.employeeCode !== undefined
           ? { employeeCode }
@@ -1215,6 +1255,9 @@ export class EmployeesService {
       firstName: true,
       lastName: true,
       documentNumber: true,
+      personalEmail: true,
+      phoneMobile: true,
+      address: true,
       employeeCode: true,
       areaId: true,
       positionId: true,
@@ -1289,6 +1332,9 @@ export class EmployeesService {
       firstName: true,
       lastName: true,
       documentNumber: true,
+      personalEmail: true,
+      phoneMobile: true,
+      address: true,
       employeeCode: true,
       areaId: true,
       positionId: true,
@@ -1799,6 +1845,9 @@ export class EmployeesService {
     firstName: string;
     lastName: string;
     documentNumber: string | null;
+    personalEmail?: string | null;
+    phoneMobile?: string | null;
+    address?: string | null;
     employeeCode: string | null;
     areaId?: string | null;
     positionId?: string | null;
@@ -1817,6 +1866,9 @@ export class EmployeesService {
       firstName: employee.firstName,
       lastName: employee.lastName,
       documentNumber: employee.documentNumber,
+      personalEmail: employee.personalEmail ?? null,
+      phoneMobile: employee.phoneMobile ?? null,
+      address: employee.address ?? null,
       employeeCode: employee.employeeCode,
       areaId: employee.areaId ?? null,
       positionId: employee.positionId ?? null,
@@ -2019,7 +2071,7 @@ export class EmployeesService {
   }
 
   private normalizeOptionalDocumentNumber(value: unknown) {
-    const normalized = this.toOptionalString(value);
+    const normalized = this.toOptionalString(value)?.toUpperCase() ?? null;
 
     if (!normalized) {
       return null;
@@ -2029,6 +2081,37 @@ export class EmployeesService {
       throw new BadRequestException(
         'El documento debe tener entre 6 y 20 caracteres validos.',
       );
+    }
+
+    return normalized;
+  }
+
+  private normalizeOptionalEmail(value: unknown) {
+    const normalized = this.toOptionalString(value)?.toLowerCase() ?? null;
+
+    if (!normalized) {
+      return null;
+    }
+
+    if (
+      normalized.length > 254 ||
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)
+    ) {
+      throw new BadRequestException('El correo personal no es valido.');
+    }
+
+    return normalized;
+  }
+
+  private normalizeOptionalPhone(value: unknown) {
+    const normalized = this.toOptionalString(value);
+
+    if (!normalized) {
+      return null;
+    }
+
+    if (!/^\+?[0-9][0-9 ()-]{6,24}$/.test(normalized)) {
+      throw new BadRequestException('El celular no es valido.');
     }
 
     return normalized;
@@ -2069,6 +2152,34 @@ export class EmployeesService {
     throw new ConflictException(
       `Ese DNI ya pertenece a ${existingEmployee.firstName} ${existingEmployee.lastName}. No se puede crear otra ficha con el mismo DNI.`,
     );
+  }
+
+  private async assertUniquePersonalEmail(
+    tenantId: string,
+    personalEmail: string | null,
+    excludeEmployeeId?: string,
+  ) {
+    if (!personalEmail) {
+      return;
+    }
+
+    const existingEmployee = await this.prisma.employee.findFirst({
+      where: {
+        tenantId,
+        personalEmail,
+        ...(excludeEmployeeId ? { id: { not: excludeEmployeeId } } : {}),
+      },
+      select: {
+        firstName: true,
+        lastName: true,
+      },
+    });
+
+    if (existingEmployee) {
+      throw new ConflictException(
+        `Ese correo ya pertenece a ${existingEmployee.firstName} ${existingEmployee.lastName}.`,
+      );
+    }
   }
 
   private normalizeOptionalCode(value: unknown, label: string) {
@@ -2112,9 +2223,15 @@ export class EmployeesService {
       throw new BadRequestException('La fecha debe tener formato YYYY-MM-DD.');
     }
 
-    const date = new Date(`${normalized}T00:00:00.000`);
+    const [year, month, day] = normalized.split('-').map(Number);
+    const date = new Date(Date.UTC(year, month - 1, day));
 
-    if (Number.isNaN(date.getTime())) {
+    if (
+      Number.isNaN(date.getTime()) ||
+      date.getUTCFullYear() !== year ||
+      date.getUTCMonth() !== month - 1 ||
+      date.getUTCDate() !== day
+    ) {
       throw new BadRequestException('La fecha enviada no es valida.');
     }
 

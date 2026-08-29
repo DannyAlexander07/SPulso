@@ -106,7 +106,10 @@ export function DocumentsView({
                   {canManage ? (
                     <>
                       <DocumentFolderForm />
-                      <CreateDocumentForm employees={employees} folders={folders} />
+                      <CreateDocumentForm
+                        employees={employees}
+                        folders={folders}
+                      />
                     </>
                   ) : null}
                 </>
@@ -283,121 +286,126 @@ function EmployeeDocumentArchive({
 
   return (
     <div className="space-y-4">
-      {groupDocumentsByCompanyEmployee(employees, documents).map((companyGroup) => (
-        <section
-          className="overflow-hidden rounded-[22px] border border-[#d5dee9] bg-white shadow-sm"
-          key={companyGroup.company.id}
-        >
-          <div className="flex items-center justify-between gap-3 border-b border-[#edf0f5] bg-[#f7faff] px-4 py-3">
-            <div className="flex min-w-0 items-center gap-3">
-              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-[#eef2ff] text-[#4f46e5]">
-                <Building2 className="h-5 w-5" />
-              </span>
-              <div className="min-w-0">
-                <p className="truncate text-sm font-semibold text-[#1f242d]">
-                  {companyGroup.company.name}
-                </p>
-                <p className="text-xs font-semibold text-[#667085]">
-                  {companyGroup.employees.length} trabajador
-                  {companyGroup.employees.length === 1 ? "" : "es"}
-                </p>
+      {groupDocumentsByCompanyEmployee(employees, documents).map(
+        (companyGroup) => (
+          <section
+            className="overflow-hidden rounded-[22px] border border-[#d5dee9] bg-white shadow-sm"
+            key={companyGroup.company.id}
+          >
+            <div className="flex items-center justify-between gap-3 border-b border-[#edf0f5] bg-[#f7faff] px-4 py-3">
+              <div className="flex min-w-0 items-center gap-3">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-[#eef2ff] text-[#4f46e5]">
+                  <Building2 className="h-5 w-5" />
+                </span>
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-[#1f242d]">
+                    {companyGroup.company.name}
+                  </p>
+                  <p className="text-xs font-semibold text-[#667085]">
+                    {companyGroup.employees.length} trabajador
+                    {companyGroup.employees.length === 1 ? "" : "es"}
+                  </p>
+                </div>
               </div>
+              <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-[#667085]">
+                {companyGroup.documentCount} docs
+              </span>
             </div>
-            <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-[#667085]">
-              {companyGroup.documentCount} docs
-            </span>
-          </div>
 
-          <div className="space-y-4 p-3">
-            {companyGroup.employees.map((employeeGroup) => (
-              <article
-                className="rounded-[20px] border border-[#e1e5eb] bg-[#fbfcfd] p-3"
-                key={employeeGroup.employee.id}
-              >
-                <div className="flex flex-col gap-3 border-b border-[#edf0f5] pb-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="flex min-w-0 items-center gap-3">
-                    <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-white text-sm font-black text-[#4f46e5] shadow-sm">
-                      {employeeInitials(employeeGroup.employee)}
+            <div className="space-y-4 p-3">
+              {companyGroup.employees.map((employeeGroup) => (
+                <article
+                  className="rounded-[20px] border border-[#e1e5eb] bg-[#fbfcfd] p-3"
+                  key={employeeGroup.employee.id}
+                >
+                  <div className="flex flex-col gap-3 border-b border-[#edf0f5] pb-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-white text-sm font-black text-[#4f46e5] shadow-sm">
+                        {employeeInitials(employeeGroup.employee)}
+                      </span>
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-[#1f242d]">
+                          {employeeGroup.employee.firstName}{" "}
+                          {employeeGroup.employee.lastName}
+                        </p>
+                        <p className="truncate text-xs font-semibold text-[#667085]">
+                          {employeeGroup.employee.jobTitle ??
+                            "Sin cargo definido"}
+                        </p>
+                      </div>
+                    </div>
+                    <span className="w-fit rounded-full bg-white px-3 py-1 text-xs font-bold text-[#667085]">
+                      {employeeGroup.documentCount} documentos
                     </span>
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-[#1f242d]">
-                        {employeeGroup.employee.firstName}{" "}
-                        {employeeGroup.employee.lastName}
-                      </p>
-                      <p className="truncate text-xs font-semibold text-[#667085]">
-                        {employeeGroup.employee.jobTitle ?? "Sin cargo definido"}
-                      </p>
-                    </div>
                   </div>
-                  <span className="w-fit rounded-full bg-white px-3 py-1 text-xs font-bold text-[#667085]">
-                    {employeeGroup.documentCount} documentos
-                  </span>
-                </div>
 
-                <div className="mt-3 grid gap-3 xl:grid-cols-2">
-                  {folderRowsForEmployee(
-                    folders,
-                    companyGroup.company.id,
-                    employeeGroup.folders,
-                  ).map((folderRow) => (
-                    <div
-                      className="rounded-2xl border border-[#dfe5ee] bg-white p-3"
-                      key={folderRow.key}
-                    >
-                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                        <div className="flex min-w-0 items-center gap-2">
-                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#eef2ff] text-[#4f46e5]">
-                            <FolderOpen className="h-4 w-4" />
-                          </span>
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-semibold text-[#1f242d]">
-                              {folderRow.name}
-                            </p>
-                            <p className="text-xs font-semibold text-[#667085]">
-                              {folderRow.items.length} archivo
-                              {folderRow.items.length === 1 ? "" : "s"}
-                            </p>
+                  <div className="mt-3 grid gap-3 xl:grid-cols-2">
+                    {folderRowsForEmployee(
+                      folders,
+                      companyGroup.company.id,
+                      employeeGroup.folders,
+                    ).map((folderRow) => (
+                      <div
+                        className="rounded-2xl border border-[#dfe5ee] bg-white p-3"
+                        key={folderRow.key}
+                      >
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#eef2ff] text-[#4f46e5]">
+                              <FolderOpen className="h-4 w-4" />
+                            </span>
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-semibold text-[#1f242d]">
+                                {folderRow.name}
+                              </p>
+                              <p className="text-xs font-semibold text-[#667085]">
+                                {folderRow.items.length} archivo
+                                {folderRow.items.length === 1 ? "" : "s"}
+                              </p>
+                            </div>
                           </div>
-                        </div>
-                        {canManage && folderRow.folder ? (
-                          <CreateDocumentForm
-                            employees={employees}
-                            folders={folders}
-                            initialEmployeeIds={[employeeGroup.employee.id]}
-                            initialFolderId={folderRow.folder.id}
-                            pinnedEmployees={[
-                              archiveEmployeeToEmployee(employeeGroup.employee),
-                            ]}
-                            triggerLabel="Subir aqui"
-                            variant="compact"
-                          />
-                        ) : null}
-                      </div>
-
-                      <div className="mt-3 space-y-2">
-                        {folderRow.items.length > 0 ? (
-                          folderRow.items.map((document) => (
-                            <CompactDocumentRow
-                              canManage={canManage}
-                              document={document}
+                          {canManage && folderRow.folder ? (
+                            <CreateDocumentForm
                               employees={employees}
-                              key={document.id}
+                              folders={folders}
+                              initialEmployeeIds={[employeeGroup.employee.id]}
+                              initialFolderId={folderRow.folder.id}
+                              pinnedEmployees={[
+                                archiveEmployeeToEmployee(
+                                  employeeGroup.employee,
+                                ),
+                              ]}
+                              triggerLabel="Subir aqui"
+                              variant="compact"
                             />
-                          ))
-                        ) : (
-                          <p className="rounded-xl border border-dashed border-[#d8dee8] bg-[#fbfcfd] px-3 py-3 text-xs font-semibold text-[#667085]">
-                            Carpeta lista para cargar documentos.
-                          </p>
-                        )}
+                          ) : null}
+                        </div>
+
+                        <div className="mt-3 space-y-2">
+                          {folderRow.items.length > 0 ? (
+                            folderRow.items.map((document) => (
+                              <CompactDocumentRow
+                                canManage={canManage}
+                                document={document}
+                                employees={employees}
+                                key={document.id}
+                              />
+                            ))
+                          ) : (
+                            <p className="rounded-xl border border-dashed border-[#d8dee8] bg-[#fbfcfd] px-3 py-3 text-xs font-semibold text-[#667085]">
+                              Carpeta lista para cargar documentos.
+                            </p>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
-              </article>
-            ))}
-          </div>
-        </section>
-      ))}
+                    ))}
+                  </div>
+                </article>
+              ))}
+            </div>
+          </section>
+        ),
+      )}
     </div>
   );
 }
@@ -420,7 +428,9 @@ function CompactDocumentRow({
           </p>
           <p className="mt-0.5 text-xs font-semibold text-[#667085]">
             {documentStatusText(document.status)}
-            {document.expiresAt ? ` · vence ${formatDate(document.expiresAt)}` : ""}
+            {document.expiresAt
+              ? ` · vence ${formatDate(document.expiresAt)}`
+              : ""}
           </p>
         </div>
         {canManage ? (
@@ -595,6 +605,9 @@ function archiveEmployeeToEmployee(employee: ArchiveEmployee): Employee {
     firstName: employee.firstName,
     lastName: employee.lastName,
     documentNumber: null,
+    personalEmail: null,
+    phoneMobile: null,
+    address: null,
     employeeCode: null,
     areaId: null,
     positionId: null,
@@ -615,10 +628,7 @@ function archiveEmployeeToEmployee(employee: ArchiveEmployee): Employee {
   };
 }
 
-function employeeInitials(employee: {
-  firstName: string;
-  lastName: string;
-}) {
+function employeeInitials(employee: { firstName: string; lastName: string }) {
   return `${employee.firstName[0] ?? ""}${employee.lastName[0] ?? ""}`.toUpperCase();
 }
 

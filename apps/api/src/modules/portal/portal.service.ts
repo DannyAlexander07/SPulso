@@ -625,38 +625,64 @@ export class PortalService {
     const phoneMobile = this.normalizePhone(updateProfileDto.phoneMobile);
     const address = this.toOptionalString(updateProfileDto.address);
 
-    const updatedEmployee = await this.prisma.employee.update({
-      where: { id: employee.id },
-      data: {
-        personalEmail,
-        phoneMobile,
-        address,
-      },
-      select: this.employeeSelect(),
-    });
+    if (personalEmail) {
+      const duplicate = await this.prisma.employee.findFirst({
+        where: {
+          tenantId: user.tenantId,
+          personalEmail,
+          id: { not: employee.id },
+        },
+        select: { id: true },
+      });
+      if (duplicate) {
+        throw new ConflictException(
+          'Ese correo personal ya está registrado en otra ficha.',
+        );
+      }
+    }
 
-    await this.auditService.write({
-      tenantId: user.tenantId,
-      companyId: employee.companyId,
-      actorType: 'user',
-      actorLabel: user.email,
-      action: 'portal_profile.updated',
-      entityType: 'Employee',
-      entityId: employee.id,
-      summary: 'El trabajador actualizo sus datos personales permitidos.',
-      before: {
-        personalEmail: employee.personalEmail,
-        phoneMobile: employee.phoneMobile,
-        address: employee.address,
-      },
-      after: {
-        personalEmail: updatedEmployee.personalEmail,
-        phoneMobile: updatedEmployee.phoneMobile,
-        address: updatedEmployee.address,
-      },
-    });
-
-    return updatedEmployee;
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const updatedEmployee = await tx.employee.update({
+          where: { id: employee.id },
+          data: { personalEmail, phoneMobile, address },
+          select: this.employeeSelect(),
+        });
+        await tx.auditLog.create({
+          data: {
+            tenantId: user.tenantId,
+            companyId: employee.companyId,
+            actorType: 'user',
+            actorLabel: user.email,
+            action: 'portal_profile.updated',
+            entityType: 'Employee',
+            entityId: employee.id,
+            summary: 'El trabajador actualizó sus datos personales permitidos.',
+            before: {
+              personalEmail: employee.personalEmail,
+              phoneMobile: employee.phoneMobile,
+              address: employee.address,
+            },
+            after: {
+              personalEmail: updatedEmployee.personalEmail,
+              phoneMobile: updatedEmployee.phoneMobile,
+              address: updatedEmployee.address,
+            },
+          },
+        });
+        return updatedEmployee;
+      });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        throw new ConflictException(
+          'Ese correo personal ya está registrado en otra ficha.',
+        );
+      }
+      throw error;
+    }
   }
 
   async updateProfilePhoto(user: AuthUser, avatarUrl: string | null) {

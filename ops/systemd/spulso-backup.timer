@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily SPulso backup timer
+
+[Timer]
+OnCalendar=*-*-* 02:15:00 America/Lima
+Persistent=true
+RandomizedDelaySec=10m
+Unit=spulso-backup.service
+
+[Install]
+WantedBy=timers.target

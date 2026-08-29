@@ -9,6 +9,8 @@ export async function selfMarkAttendance(payload: {
   action: "CHECK_IN" | "CHECK_OUT";
   latitude?: number;
   longitude?: number;
+  locationConsent: boolean;
+  privacyNoticeVersion: "gps-2026-08-29";
 }) {
   const response = await fetch(`${API_URL}/asistencia/marcacion-personal`, {
     method: "POST",

@@ -1,4 +1,10 @@
 services:
+  clamav:
+    image: clamav/clamav:stable
+    restart: unless-stopped
+    volumes:
+      - clamav-data:/var/lib/clamav
+
   postgres:
     image: postgres:16
     restart: unless-stopped
@@ -20,6 +26,8 @@ services:
       dockerfile: apps/api/Dockerfile
     restart: unless-stopped
     depends_on:
+      clamav:
+        condition: service_started
       postgres:
         condition: service_healthy
     env_file:
@@ -98,4 +106,5 @@ services:
 
 volumes:
   api-uploads:
+  clamav-data:
   postgres-data:

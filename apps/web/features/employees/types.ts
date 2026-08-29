@@ -3,6 +3,9 @@ export type Employee = {
   firstName: string;
   lastName: string;
   documentNumber: string | null;
+  personalEmail: string | null;
+  phoneMobile: string | null;
+  address: string | null;
   employeeCode: string | null;
   areaId: string | null;
   positionId: string | null;
@@ -88,9 +91,78 @@ export type CreateEmployeePayload = {
   documentNumber?: string;
   employeeCode?: string;
   attendancePin?: string;
+  personalEmail?: string;
+  phoneMobile?: string;
+  address?: string;
   jobTitle?: string;
   area?: string;
   hireDate?: string;
+};
+
+export type EmployeeImportBatchStatus =
+  "PROCESSING" | "REVIEW_REQUIRED" | "COMPLETED" | "FAILED";
+
+export type EmployeeImportRowStatus =
+  "PENDING" | "IMPORTED" | "FAILED" | "SKIPPED";
+
+export type EmployeeImportRowData = {
+  firstName: string;
+  lastName: string;
+  documentNumber: string;
+  personalEmail: string;
+  phoneMobile: string;
+  address: string;
+  area: string;
+  position: string;
+  team: string;
+  managerReference: string;
+  hireDate: string;
+  employeeCode: string;
+};
+
+export type EmployeeImportError = {
+  field: keyof EmployeeImportRowData | "attendancePin" | "row";
+  code: string;
+  message: string;
+  conflict?: {
+    employeeId: string;
+    employeeName: string;
+    companyName: string;
+  };
+};
+
+export type EmployeeImportRow = {
+  id: string;
+  rowNumber: number;
+  status: EmployeeImportRowStatus;
+  rawData: EmployeeImportRowData | { redacted: true };
+  normalizedData: Record<string, unknown> | null;
+  errors: EmployeeImportError[];
+  version: number;
+  employeeId: string | null;
+  importedAt: string | null;
+  updatedAt: string;
+};
+
+export type EmployeeImportBatch = {
+  id: string;
+  originalFileName: string;
+  status: EmployeeImportBatchStatus;
+  totalRows: number;
+  importedRows: number;
+  pendingRows: number;
+  failedRows: number;
+  skippedRows: number;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  company: {
+    id: string;
+    name: string;
+    slug: string;
+  };
+  rows?: EmployeeImportRow[];
+  duplicateUpload?: boolean;
 };
 
 export type UpdateEmployeePayload = {
@@ -102,6 +174,9 @@ export type UpdateEmployeePayload = {
   firstName?: string;
   lastName?: string;
   documentNumber?: string | null;
+  personalEmail?: string | null;
+  phoneMobile?: string | null;
+  address?: string | null;
   employeeCode?: string | null;
   jobTitle?: string | null;
   area?: string | null;

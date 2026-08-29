@@ -143,6 +143,32 @@ Ejemplo cron cada 5 minutos:
 */5 * * * * cd /opt/spulso && docker compose --env-file .env.production -f docker-compose.production.yml run --rm observability-check
 ```
 
+El repositorio tambien incluye `ops/monitoring/spulso-health-check.sh` y sus
+unidades systemd. El endpoint externo recomendado es
+`https://spulso.altaterraresources.com.pe/health`.
+
+## Backups verificados
+
+Instala `ops/backup/spulso-backup.sh` como
+`/usr/local/sbin/spulso-backup`, copia las unidades de `ops/systemd` y activa
+`spulso-backup.timer`. Cada ejecucion crea dump custom de PostgreSQL, archivo de
+uploads, checksums y validacion de lectura. Configura `SPULSO_RCLONE_REMOTE` en
+`/etc/spulso/backup.env` para la copia fuera de la VPS; sin este destino el
+backup local no protege contra perdida total del servidor.
+
+Prueba de restauracion desechable:
+
+```bash
+/usr/local/sbin/spulso-restore-verify /var/backups/spulso/FECHA/postgres.dump
+```
+
+## Correo y antivirus
+
+En produccion `EMAIL_DELIVERY_MODE=smtp`: si SMTP no esta completo, la cola no
+se marca como enviada. Todas las cargas pasan por ClamAV (`MALWARE_SCAN_MODE`)
+y fallan cerradas si el analizador no responde. Las pruebas de aceptacion deben
+incluir un mensaje SMTP real, un PDF limpio y el archivo EICAR.
+
 ## Checklist antes de liberar
 
 - `npm --prefix apps/api run lint`

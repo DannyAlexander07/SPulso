@@ -32,14 +32,23 @@ function startOfToday() {
 }
 
 async function main() {
-  if (
-    process.env.NODE_ENV === 'production' &&
-    process.env.ALLOW_DEMO_SEED !== 'true'
-  ) {
+  const isProduction = process.env.NODE_ENV === 'production';
+  if (isProduction && process.env.ALLOW_DEMO_SEED !== 'true') {
     throw new Error(
       'El seed demo esta bloqueado en produccion. Usa migraciones y procesos de alta controlados.',
     );
   }
+
+  const adminPassword = seedPassword(
+    'DEMO_ADMIN_PASSWORD',
+    'Admin1234.',
+    isProduction,
+  );
+  const workerPassword = seedPassword(
+    'DEMO_WORKER_PASSWORD',
+    'Trabajador123.',
+    isProduction,
+  );
 
   const tenant = await prisma.tenant.upsert({
     where: { slug: 'grupo-sp' },
@@ -124,7 +133,7 @@ async function main() {
     },
   });
 
-  const adminPasswordHash = await bcrypt.hash('Admin1234.', 12);
+  const adminPasswordHash = await bcrypt.hash(adminPassword, 12);
 
   const adminUser = await prisma.user.upsert({
     where: { email: 'admin@spulso.local' },
@@ -133,6 +142,10 @@ async function main() {
       companyId: null,
       roleId: adminRole.id,
       status: UserStatus.ACTIVE,
+      passwordHash: adminPasswordHash,
+      failedLoginAttempts: 0,
+      loginLockedUntil: null,
+      lastFailedLoginAt: null,
     },
     create: {
       tenantId: tenant.id,
@@ -413,7 +426,7 @@ async function main() {
   });
 
   if (workerEmployee) {
-    const workerPasswordHash = await bcrypt.hash('Trabajador123.', 12);
+    const workerPasswordHash = await bcrypt.hash(workerPassword, 12);
     const workerUser = await prisma.user.upsert({
       where: { email: 'trabajador@spulso.local' },
       update: {
@@ -423,6 +436,10 @@ async function main() {
         firstName: workerEmployee.firstName,
         lastName: workerEmployee.lastName,
         status: UserStatus.ACTIVE,
+        passwordHash: workerPasswordHash,
+        failedLoginAttempts: 0,
+        loginLockedUntil: null,
+        lastFailedLoginAt: null,
       },
       create: {
         tenantId: tenant.id,
@@ -836,6 +853,39 @@ async function main() {
   console.log(
     'Seed completed: Grupo SP, companies, roles, admin user, employees, attendance, requests, documents, organization, benefits, and announcements created.',
   );
+}
+
+function seedPassword(
+  environmentName: 'DEMO_ADMIN_PASSWORD' | 'DEMO_WORKER_PASSWORD',
+  developmentDefault: string,
+  isProduction: boolean,
+) {
+  const configured = process.env[environmentName]?.trim();
+
+  if (!isProduction) {
+    return configured || developmentDefault;
+  }
+
+  const knownFixturePasswords = new Set([
+    'Admin1234.',
+    'Trabajador123.',
+    'Rrhh1234.',
+  ]);
+  if (
+    !configured ||
+    configured.length < 16 ||
+    knownFixturePasswords.has(configured) ||
+    !/[a-z]/.test(configured) ||
+    !/[A-Z]/.test(configured) ||
+    !/\d/.test(configured) ||
+    !/[^A-Za-z0-9]/.test(configured)
+  ) {
+    throw new Error(
+      `${environmentName} debe configurarse en produccion con al menos 16 caracteres, mayuscula, minuscula, numero y simbolo; no se aceptan credenciales demo.`,
+    );
+  }
+
+  return configured;
 }
 
 function toSlug(value: string) {

@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 import * as jwt from 'jsonwebtoken';
-import { ThemePreference } from '@prisma/client';
+import { Prisma, ThemePreference } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import {
   getJwtSecret,
@@ -25,6 +25,19 @@ type AuthTokenPayload = {
   permissions?: string[];
   sessionVersion: number;
 };
+
+type LoginSecurityRow = {
+  passwordHash: string;
+  failedLoginAttempts: number;
+  loginLockedUntil: Date | null;
+};
+
+const DUMMY_PASSWORD_HASH = bcrypt.hashSync(
+  'spulso-invalid-password-comparison-only',
+  12,
+);
+const MAX_FAILED_LOGINS = 5;
+const LOGIN_LOCK_MINUTES = 15;
 
 @Injectable()
 export class AuthService {
@@ -64,10 +77,14 @@ export class AuthService {
     });
 
     if (!user || user.status !== 'ACTIVE') {
+      await bcrypt.compare(password, DUMMY_PASSWORD_HASH);
       throw new UnauthorizedException('Credenciales invalidas.');
     }
 
-    const passwordMatches = await bcrypt.compare(password, user.passwordHash);
+    const passwordMatches = await this.verifyPasswordAtomically(
+      user.id,
+      password,
+    );
 
     if (!passwordMatches) {
       throw new UnauthorizedException('Credenciales invalidas.');
@@ -93,6 +110,68 @@ export class AuthService {
       accessToken,
       user: this.toPublicUser({ ...user, role, employee }),
     };
+  }
+
+  private async verifyPasswordAtomically(userId: string, password: string) {
+    return this.prisma.$transaction(async (tx) => {
+      const rows = await tx.$queryRaw<LoginSecurityRow[]>(Prisma.sql`
+        SELECT
+          "passwordHash",
+          "failedLoginAttempts",
+          "loginLockedUntil"
+        FROM "User"
+        WHERE "id" = ${userId}
+        FOR UPDATE
+      `);
+      const security = rows[0];
+      if (!security) {
+        await bcrypt.compare(password, DUMMY_PASSWORD_HASH);
+        return false;
+      }
+
+      const passwordMatches = await bcrypt.compare(
+        password,
+        security.passwordHash,
+      );
+      const now = new Date();
+      if (
+        security.loginLockedUntil &&
+        security.loginLockedUntil.getTime() > now.getTime()
+      ) {
+        return false;
+      }
+
+      if (!passwordMatches) {
+        const priorAttempts = security.loginLockedUntil
+          ? 0
+          : security.failedLoginAttempts;
+        const failedLoginAttempts = priorAttempts + 1;
+        const mustLock = failedLoginAttempts >= MAX_FAILED_LOGINS;
+        await tx.user.update({
+          where: { id: userId },
+          data: {
+            failedLoginAttempts: mustLock ? 0 : failedLoginAttempts,
+            lastFailedLoginAt: now,
+            loginLockedUntil: mustLock
+              ? new Date(now.getTime() + LOGIN_LOCK_MINUTES * 60 * 1000)
+              : null,
+          },
+          select: { id: true },
+        });
+        return false;
+      }
+
+      await tx.user.update({
+        where: { id: userId },
+        data: {
+          failedLoginAttempts: 0,
+          lastFailedLoginAt: null,
+          loginLockedUntil: null,
+        },
+        select: { id: true },
+      });
+      return true;
+    });
   }
 
   async me(authorization?: string) {

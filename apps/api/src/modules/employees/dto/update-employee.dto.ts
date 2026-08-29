@@ -9,6 +9,9 @@ export type UpdateEmployeeDto = {
   firstName?: string;
   lastName?: string;
   documentNumber?: string | null;
+  personalEmail?: string | null;
+  phoneMobile?: string | null;
+  address?: string | null;
   employeeCode?: string | null;
   jobTitle?: string | null;
   area?: string | null;

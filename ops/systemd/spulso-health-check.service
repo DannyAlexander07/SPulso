@@ -1,0 +1,11 @@
+[Unit]
+Description=SPulso external HTTPS health check
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/spulso-health-check
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/spulso-monitor
+NoNewPrivileges=true

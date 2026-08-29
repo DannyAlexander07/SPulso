@@ -15,6 +15,7 @@ const hopByHopHeaders = new Set([
   "upgrade",
 ]);
 const maxMultipartBytes = 26 * 1024 * 1024;
+const maxEmployeeImportBytes = 4 * 1024 * 1024;
 
 type RouteContext = {
   params: Promise<{
@@ -47,7 +48,9 @@ async function forwardToApi(request: NextRequest, context: RouteContext) {
   }
 
   const { path } = await context.params;
-  const targetUrl = new URL(`${API_URL}/${path.map(encodeURIComponent).join("/")}`);
+  const targetUrl = new URL(
+    `${API_URL}/${path.map(encodeURIComponent).join("/")}`,
+  );
   targetUrl.search = request.nextUrl.search;
 
   const headers = new Headers();
@@ -67,8 +70,12 @@ async function forwardToApi(request: NextRequest, context: RouteContext) {
   if (request.method !== "GET" && request.method !== "HEAD") {
     if (contentType?.includes("multipart/form-data")) {
       const contentLength = Number(request.headers.get("content-length") ?? 0);
+      const bodyLimit =
+        path.join("/") === "trabajadores/importaciones"
+          ? maxEmployeeImportBytes
+          : maxMultipartBytes;
 
-      if (contentLength > maxMultipartBytes) {
+      if (contentLength > bodyLimit) {
         return NextResponse.json(
           { message: "El archivo excede el limite permitido." },
           { status: 413 },
@@ -81,7 +88,10 @@ async function forwardToApi(request: NextRequest, context: RouteContext) {
       });
 
       if (!authResponse.ok) {
-        return NextResponse.json({ message: "Sesion no valida." }, { status: 401 });
+        return NextResponse.json(
+          { message: "Sesion no valida." },
+          { status: 401 },
+        );
       }
 
       init.body = request.body;

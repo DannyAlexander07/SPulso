@@ -104,6 +104,7 @@ enum NotificationType {
 
 enum EmailDeliveryStatus {
   PENDING
+  PROCESSING
   SENT
   FAILED
   SKIPPED
@@ -174,6 +175,20 @@ enum ExportJobType {
   USERS
 }
 
+enum EmployeeImportBatchStatus {
+  PROCESSING
+  REVIEW_REQUIRED
+  COMPLETED
+  FAILED
+}
+
+enum EmployeeImportRowStatus {
+  PENDING
+  IMPORTED
+  FAILED
+  SKIPPED
+}
+
 model Tenant {
   id        String       @id @default(uuid())
   name      String
@@ -206,23 +221,24 @@ model Tenant {
   announcementReads           AnnouncementRead[]
   announcementEmailDeliveries AnnouncementEmailDelivery[]
   exportJobs                  ExportJob[]
+  employeeImportBatches       EmployeeImportBatch[]
 }
 
 model Company {
-  id                   String        @id @default(uuid())
-  tenantId             String
-  name                 String
-  slug                 String
-  ruc                  String?
-  workStartTime        String        @default("09:00")
-  lateToleranceMinutes Int           @default(15)
-  enforceAttendanceGeofence Boolean @default(false)
-  officeLatitude       Float?
-  officeLongitude      Float?
-  attendanceRadiusMeters Int         @default(200)
-  status               CompanyStatus @default(ACTIVE)
-  createdAt            DateTime      @default(now())
-  updatedAt            DateTime      @updatedAt
+  id                        String        @id @default(uuid())
+  tenantId                  String
+  name                      String
+  slug                      String
+  ruc                       String?
+  workStartTime             String        @default("09:00")
+  lateToleranceMinutes      Int           @default(15)
+  enforceAttendanceGeofence Boolean       @default(false)
+  officeLatitude            Float?
+  officeLongitude           Float?
+  attendanceRadiusMeters    Int           @default(200)
+  status                    CompanyStatus @default(ACTIVE)
+  createdAt                 DateTime      @default(now())
+  updatedAt                 DateTime      @updatedAt
 
   tenant                    Tenant                     @relation(fields: [tenantId], references: [id])
   users                     User[]
@@ -244,6 +260,7 @@ model Company {
   benefitAudiences          BenefitAudience[]
   announcementAudiences     AnnouncementAudience[]
   exportJobs                ExportJob[]
+  employeeImportBatches     EmployeeImportBatch[]
 
   @@unique([tenantId, slug])
   @@index([tenantId])
@@ -530,14 +547,18 @@ model User {
   status          UserStatus      @default(INVITED)
   themePreference ThemePreference @default(LIGHT)
   sessionVersion  Int             @default(0)
+  failedLoginAttempts Int          @default(0)
+  loginLockedUntil   DateTime?
+  lastFailedLoginAt  DateTime?
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
 
-  tenant     Tenant      @relation(fields: [tenantId], references: [id])
-  company    Company?    @relation(fields: [companyId], references: [id])
-  role       Role?       @relation(fields: [roleId], references: [id])
-  employee   Employee?
-  exportJobs ExportJob[]
+  tenant                Tenant                @relation(fields: [tenantId], references: [id])
+  company               Company?              @relation(fields: [companyId], references: [id])
+  role                  Role?                 @relation(fields: [roleId], references: [id])
+  employee              Employee?
+  exportJobs            ExportJob[]
+  employeeImportBatches EmployeeImportBatch[] @relation("EmployeeImportCreator")
 
   @@index([tenantId])
   @@index([companyId])
@@ -545,33 +566,33 @@ model User {
 }
 
 model Employee {
-  id                String         @id @default(uuid())
-  tenantId          String
-  companyId         String
-  userId            String?        @unique
-  areaId            String?
-  positionId        String?
-  teamId            String?
-  managerId         String?
-  documentNumber    String?
-  employeeCode      String?
-  attendancePinHash String?
-  attendancePinChangeRequired Boolean @default(true)
-  attendancePinFailedAttempts Int @default(0)
-  attendancePinLockedUntil DateTime?
-  personalEmail     String?
-  phoneMobile       String?
-  address           String?
-  firstName         String
-  lastName          String
-  jobTitle          String?
-  area              String?
-  hireDate          DateTime?
-  terminatedAt      DateTime?
-  terminationReason String?
-  status            EmployeeStatus @default(ACTIVE)
-  createdAt         DateTime       @default(now())
-  updatedAt         DateTime       @updatedAt
+  id                          String         @id @default(uuid())
+  tenantId                    String
+  companyId                   String
+  userId                      String?        @unique
+  areaId                      String?
+  positionId                  String?
+  teamId                      String?
+  managerId                   String?
+  documentNumber              String?
+  employeeCode                String?
+  attendancePinHash           String?
+  attendancePinChangeRequired Boolean        @default(true)
+  attendancePinFailedAttempts Int            @default(0)
+  attendancePinLockedUntil    DateTime?
+  personalEmail               String?
+  phoneMobile                 String?
+  address                     String?
+  firstName                   String
+  lastName                    String
+  jobTitle                    String?
+  area                        String?
+  hireDate                    DateTime?
+  terminatedAt                DateTime?
+  terminationReason           String?
+  status                      EmployeeStatus @default(ACTIVE)
+  createdAt                   DateTime       @default(now())
+  updatedAt                   DateTime       @updatedAt
 
   tenant                      Tenant                      @relation(fields: [tenantId], references: [id])
   company                     Company                     @relation(fields: [companyId], references: [id])
@@ -591,8 +612,11 @@ model Employee {
   clientAssignments           EmployeeClientAssignment[]
   timelineEvents              EmployeeTimelineEvent[]     @relation("EmployeeTimelineOwner")
   timelineManagerEvents       EmployeeTimelineEvent[]     @relation("EmployeeTimelineManager")
+  importRows                  EmployeeImportRow[]
 
   @@unique([companyId, employeeCode])
+  @@unique([tenantId, documentNumber])
+  @@unique([tenantId, personalEmail])
   @@index([tenantId])
   @@index([companyId])
   @@index([tenantId, status, firstName, id])
@@ -603,6 +627,58 @@ model Employee {
   @@index([positionId])
   @@index([teamId])
   @@index([managerId])
+}
+
+model EmployeeImportBatch {
+  id               String                    @id @default(uuid())
+  tenantId         String
+  companyId        String
+  createdByUserId  String
+  originalFileName String
+  fileHash         String
+  status           EmployeeImportBatchStatus @default(PROCESSING)
+  totalRows        Int                       @default(0)
+  importedRows     Int                       @default(0)
+  pendingRows      Int                       @default(0)
+  failedRows       Int                       @default(0)
+  skippedRows      Int                       @default(0)
+  lastError        String?
+  completedAt      DateTime?
+  createdAt        DateTime                  @default(now())
+  updatedAt        DateTime                  @updatedAt
+
+  tenant    Tenant              @relation(fields: [tenantId], references: [id])
+  company   Company             @relation(fields: [companyId], references: [id])
+  createdBy User                @relation("EmployeeImportCreator", fields: [createdByUserId], references: [id])
+  rows      EmployeeImportRow[]
+
+  @@unique([tenantId, companyId, fileHash])
+  @@index([tenantId, createdAt])
+  @@index([companyId, createdAt])
+  @@index([createdByUserId, createdAt])
+  @@index([tenantId, status, updatedAt])
+}
+
+model EmployeeImportRow {
+  id             String                  @id @default(uuid())
+  batchId        String
+  employeeId     String?
+  rowNumber      Int
+  status         EmployeeImportRowStatus @default(PENDING)
+  rawData        Json
+  normalizedData Json?
+  errors         Json
+  version        Int                     @default(0)
+  importedAt     DateTime?
+  createdAt      DateTime                @default(now())
+  updatedAt      DateTime                @updatedAt
+
+  batch    EmployeeImportBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  employee Employee?           @relation(fields: [employeeId], references: [id])
+
+  @@unique([batchId, rowNumber])
+  @@index([batchId, status, rowNumber])
+  @@index([employeeId])
 }
 
 model EmployeeClientAssignment {
@@ -683,6 +759,10 @@ model AttendanceRecord {
   checkInLongitude  Float?
   checkOutLatitude  Float?
   checkOutLongitude Float?
+  checkInConsentAt             DateTime?
+  checkOutConsentAt            DateTime?
+  checkInPrivacyNoticeVersion  String?
+  checkOutPrivacyNoticeVersion String?
   status            AttendanceStatus @default(PRESENT)
   source            String           @default("manual")
   notes             String?

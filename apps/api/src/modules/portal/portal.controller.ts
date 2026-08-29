@@ -23,6 +23,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PortalAccessGuard } from '../auth/portal-access.guard';
 import type { CreateRequestDto } from '../requests/dto/create-request.dto';
 import { PortalService } from './portal.service';
+import { MalwareScanService } from '../../security/malware-scan.service';
 
 const allowedMimeTypes = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const userUploadRoot = join(process.cwd(), 'uploads', 'usuarios');
@@ -31,7 +32,10 @@ const userImageMaxSize = 5 * 1024 * 1024;
 @Controller()
 @UseGuards(JwtAuthGuard, PortalAccessGuard)
 export class PortalController {
-  constructor(private readonly portalService: PortalService) {}
+  constructor(
+    private readonly malwareScan: MalwareScanService,
+    private readonly portalService: PortalService,
+  ) {}
 
   @Get(['portal/perfil', 'portal/profile'])
   getProfile(@CurrentUser() user: AuthUser) {
@@ -130,6 +134,13 @@ export class PortalController {
       throw new BadRequestException(
         'La imagen no coincide con un archivo JPG, PNG o WebP valido.',
       );
+    }
+
+    try {
+      await this.malwareScan.scanFile(file.path);
+    } catch (error) {
+      unlinkSync(file.path);
+      throw error;
     }
 
     const url = `/uploads/usuarios/${file.filename}`;

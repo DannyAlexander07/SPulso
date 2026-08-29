@@ -40,12 +40,19 @@ export function CreateEmployeeForm({
   const [message, setMessage] = useState("");
   const [selectedCompanyId, setSelectedCompanyId] = useState("");
   const [suggestedCode, setSuggestedCode] = useState("");
-  const filteredAreas = organization.areas.filter((area) => area.company.id === selectedCompanyId);
-  const filteredPositions = organization.positions.filter(
-    (position) => position.scope === "GROUP" || position.company?.id === selectedCompanyId,
+  const filteredAreas = organization.areas.filter(
+    (area) => area.company.id === selectedCompanyId,
   );
-  const filteredTeams = organization.teams.filter((team) => team.company.id === selectedCompanyId);
-  const filteredEmployees = organization.employees.filter((employee) => employee.company.id === selectedCompanyId);
+  const filteredPositions = organization.positions.filter(
+    (position) =>
+      position.scope === "GROUP" || position.company?.id === selectedCompanyId,
+  );
+  const filteredTeams = organization.teams.filter(
+    (team) => team.company.id === selectedCompanyId,
+  );
+  const filteredEmployees = organization.employees.filter(
+    (employee) => employee.company.id === selectedCompanyId,
+  );
   const documentInputId = "create-employee-document-number";
   const firstNameInputId = "create-employee-first-name";
   const lastNameInputId = "create-employee-last-name";
@@ -118,15 +125,21 @@ export function CreateEmployeeForm({
       return;
     }
 
-    const firstNameInput = document.getElementById(firstNameInputId) as HTMLInputElement | null;
-    const lastNameInput = document.getElementById(lastNameInputId) as HTMLInputElement | null;
+    const firstNameInput = document.getElementById(
+      firstNameInputId,
+    ) as HTMLInputElement | null;
+    const lastNameInput = document.getElementById(
+      lastNameInputId,
+    ) as HTMLInputElement | null;
 
     if (firstNameInput) {
       firstNameInput.value = result.nombres;
     }
 
     if (lastNameInput) {
-      lastNameInput.value = [result.apellidoPaterno, result.apellidoMaterno].filter(Boolean).join(" ");
+      lastNameInput.value = [result.apellidoPaterno, result.apellidoMaterno]
+        .filter(Boolean)
+        .join(" ");
     }
   }
 
@@ -149,6 +162,9 @@ export function CreateEmployeeForm({
         firstName: String(data.get("firstName") ?? ""),
         lastName: String(data.get("lastName") ?? ""),
         documentNumber: String(data.get("documentNumber") ?? ""),
+        personalEmail: String(data.get("personalEmail") ?? ""),
+        phoneMobile: String(data.get("phoneMobile") ?? ""),
+        address: String(data.get("address") ?? ""),
         attendancePin: String(data.get("attendancePin") ?? ""),
         hireDate: String(data.get("hireDate") ?? ""),
       });
@@ -161,7 +177,11 @@ export function CreateEmployeeForm({
       closeModal();
     } catch (error) {
       setState("error");
-      setMessage(error instanceof Error ? error.message : "No se pudo crear el trabajador.");
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "No se pudo crear el trabajador.",
+      );
     }
   }
 
@@ -199,7 +219,8 @@ export function CreateEmployeeForm({
                           Crear trabajador
                         </h3>
                         <p className="mt-1 max-w-2xl text-sm leading-6 text-[#667085]">
-                          Registra identidad, estructura laboral y seguridad de marcacion en una sola ficha.
+                          Registra identidad, estructura laboral y seguridad de
+                          marcacion en una sola ficha.
                         </p>
                       </div>
                     </div>
@@ -215,7 +236,11 @@ export function CreateEmployeeForm({
                   </div>
                 </div>
 
-                <form autoComplete="off" className="max-h-[calc(100dvh-164px)] overflow-y-auto bg-[#f8fafc] px-5 py-5" onSubmit={handleSubmit}>
+                <form
+                  autoComplete="off"
+                  className="max-h-[calc(100dvh-164px)] overflow-y-auto bg-[#f8fafc] px-5 py-5"
+                  onSubmit={handleSubmit}
+                >
                   <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
                     <div className="space-y-4">
                       <FormSection
@@ -247,7 +272,9 @@ export function CreateEmployeeForm({
                             />
                           </Field>
                           <div className="space-y-1.5">
-                            <span className="text-xs font-semibold text-[#667085]">DNI</span>
+                            <span className="text-xs font-semibold text-[#667085]">
+                              DNI
+                            </span>
                             <div className="flex gap-2">
                               <input
                                 autoComplete="new-password"
@@ -259,7 +286,10 @@ export function CreateEmployeeForm({
                                 pattern="[0-9]*"
                                 placeholder="Ej. 70000005"
                               />
-                              <IdentityLookupButton documentInputId={documentInputId} onFound={applyIdentityLookup} />
+                              <IdentityLookupButton
+                                documentInputId={documentInputId}
+                                onFound={applyIdentityLookup}
+                              />
                             </div>
                           </div>
                           <Field label="PIN inicial">
@@ -268,12 +298,41 @@ export function CreateEmployeeForm({
                               className={inputClassName}
                               inputMode="numeric"
                               maxLength={8}
-                              minLength={4}
+                              minLength={6}
                               name="attendancePin"
                               pattern="[0-9]*"
                               placeholder="Ej. 5837"
                               required
                               type="password"
+                            />
+                          </Field>
+                          <Field label="Correo personal">
+                            <input
+                              autoComplete="email"
+                              className={inputClassName}
+                              maxLength={254}
+                              name="personalEmail"
+                              placeholder="persona@correo.com"
+                              type="email"
+                            />
+                          </Field>
+                          <Field label="Celular">
+                            <input
+                              autoComplete="tel"
+                              className={inputClassName}
+                              maxLength={25}
+                              name="phoneMobile"
+                              placeholder="Ej. +51 999 999 999"
+                              type="tel"
+                            />
+                          </Field>
+                          <Field label="Dirección">
+                            <input
+                              autoComplete="street-address"
+                              className={inputClassName}
+                              maxLength={240}
+                              name="address"
+                              placeholder="Dirección de residencia"
                             />
                           </Field>
                         </div>
@@ -289,7 +348,9 @@ export function CreateEmployeeForm({
                             <select
                               className={inputClassName}
                               name="companyId"
-                              onChange={(event) => setSelectedCompanyId(event.target.value)}
+                              onChange={(event) =>
+                                setSelectedCompanyId(event.target.value)
+                              }
                               required
                               value={selectedCompanyId}
                             >
@@ -302,7 +363,13 @@ export function CreateEmployeeForm({
                             </select>
                           </Field>
                           <Field label="Area">
-                            <select className={inputClassName} disabled={!selectedCompanyId} key={`area-${selectedCompanyId}`} name="areaId" required>
+                            <select
+                              className={inputClassName}
+                              disabled={!selectedCompanyId}
+                              key={`area-${selectedCompanyId}`}
+                              name="areaId"
+                              required
+                            >
                               <option value="">Seleccionar area</option>
                               {filteredAreas.map((area) => (
                                 <option key={area.id} value={area.id}>
@@ -312,20 +379,38 @@ export function CreateEmployeeForm({
                             </select>
                           </Field>
                           <Field label="Cargo">
-                            <select className={inputClassName} disabled={!selectedCompanyId} key={`position-${selectedCompanyId}`} name="positionId" required>
+                            <select
+                              className={inputClassName}
+                              disabled={!selectedCompanyId}
+                              key={`position-${selectedCompanyId}`}
+                              name="positionId"
+                              required
+                            >
                               <option value="">Seleccionar cargo</option>
                               {filteredPositions.map((position) => (
                                 <option key={position.id} value={position.id}>
-                                  {position.scope === "GROUP" ? `${position.name} - Grupo` : position.name}
+                                  {position.scope === "GROUP"
+                                    ? `${position.name} - Grupo`
+                                    : position.name}
                                 </option>
                               ))}
                             </select>
                           </Field>
                           <Field label="Ingreso">
-                            <input autoComplete="off" className={inputClassName} name="hireDate" type="date" />
+                            <input
+                              autoComplete="off"
+                              className={inputClassName}
+                              name="hireDate"
+                              type="date"
+                            />
                           </Field>
                           <Field label="Equipo">
-                            <select className={inputClassName} disabled={!selectedCompanyId} key={`team-${selectedCompanyId}`} name="teamId">
+                            <select
+                              className={inputClassName}
+                              disabled={!selectedCompanyId}
+                              key={`team-${selectedCompanyId}`}
+                              name="teamId"
+                            >
                               <option value="">Sin equipo asignado</option>
                               {filteredTeams.map((team) => (
                                 <option key={team.id} value={team.id}>
@@ -335,7 +420,12 @@ export function CreateEmployeeForm({
                             </select>
                           </Field>
                           <Field label="Jefe directo">
-                            <select className={inputClassName} disabled={!selectedCompanyId} key={`manager-${selectedCompanyId}`} name="managerId">
+                            <select
+                              className={inputClassName}
+                              disabled={!selectedCompanyId}
+                              key={`manager-${selectedCompanyId}`}
+                              name="managerId"
+                            >
                               <option value="">Sin jefe directo</option>
                               {filteredEmployees.map((employee) => (
                                 <option key={employee.id} value={employee.id}>
@@ -355,11 +445,18 @@ export function CreateEmployeeForm({
                             <Building2 className="h-5 w-5" />
                           </span>
                           <div>
-                            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#667085]">Codigo interno</p>
-                            <p className="mt-1 text-sm font-bold text-[#1f242d]">{suggestedCode || "Selecciona una empresa"}</p>
+                            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#667085]">
+                              Codigo interno
+                            </p>
+                            <p className="mt-1 text-sm font-bold text-[#1f242d]">
+                              {suggestedCode || "Selecciona una empresa"}
+                            </p>
                           </div>
                         </div>
-                        <p className="mt-3 text-xs leading-5 text-[#667085]">Se genera por empresa para evitar duplicados y ordenar directorios.</p>
+                        <p className="mt-3 text-xs leading-5 text-[#667085]">
+                          Se genera por empresa para evitar duplicados y ordenar
+                          directorios.
+                        </p>
                       </div>
 
                       <div className="rounded-[22px] border border-[#dbeafe] bg-[#eff6ff] p-4 text-[#1d4ed8]">
@@ -368,15 +465,22 @@ export function CreateEmployeeForm({
                           Marcacion personal
                         </p>
                         <p className="mt-2 text-xs leading-5">
-                          El PIN permite registrar entrada y salida con evidencia GPS desde el portal trabajador.
+                          El PIN permite registrar entrada y salida con
+                          evidencia GPS desde el portal trabajador.
                         </p>
                       </div>
 
                       <div className="grid gap-2 text-xs font-semibold text-[#475467]">
                         <MiniStep icon={IdCard} label="DNI y nombres" />
-                        <MiniStep icon={BriefcaseBusiness} label="Cargo y area" />
+                        <MiniStep
+                          icon={BriefcaseBusiness}
+                          label="Cargo y area"
+                        />
                         <MiniStep icon={UsersRound} label="Equipo y jefe" />
-                        <MiniStep icon={CalendarDays} label="Fecha de ingreso" />
+                        <MiniStep
+                          icon={CalendarDays}
+                          label="Fecha de ingreso"
+                        />
                         <MiniStep icon={KeyRound} label="PIN inicial" />
                       </div>
                     </aside>
@@ -384,9 +488,18 @@ export function CreateEmployeeForm({
 
                   <div className="sticky bottom-0 -mx-5 mt-5 border-t border-[#e1e5eb] bg-white/95 px-5 py-4 backdrop-blur">
                     <div className="min-h-9">
-                      {state === "loading" ? <ActionFeedback message="Creando trabajador..." tone="loading" /> : null}
-                      {state === "success" ? <ActionFeedback message={message} tone="success" /> : null}
-                      {state === "error" ? <ActionFeedback message={message} tone="error" /> : null}
+                      {state === "loading" ? (
+                        <ActionFeedback
+                          message="Creando trabajador..."
+                          tone="loading"
+                        />
+                      ) : null}
+                      {state === "success" ? (
+                        <ActionFeedback message={message} tone="success" />
+                      ) : null}
+                      {state === "error" ? (
+                        <ActionFeedback message={message} tone="error" />
+                      ) : null}
                     </div>
 
                     <div className="mt-3 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
@@ -449,7 +562,13 @@ function FormSection({
   );
 }
 
-function MiniStep({ icon: Icon, label }: { icon: React.ElementType; label: string }) {
+function MiniStep({
+  icon: Icon,
+  label,
+}: {
+  icon: React.ElementType;
+  label: string;
+}) {
   return (
     <div className="flex items-center gap-2 rounded-2xl border border-[#e1e5eb] bg-white px-3 py-2">
       <Icon className="h-4 w-4 text-[#4f46e5]" />
@@ -458,7 +577,13 @@ function MiniStep({ icon: Icon, label }: { icon: React.ElementType; label: strin
   );
 }
 
-function Field({ children, label }: { children: React.ReactNode; label: string }) {
+function Field({
+  children,
+  label,
+}: {
+  children: React.ReactNode;
+  label: string;
+}) {
   return (
     <label className="space-y-1.5">
       <span className="text-xs font-semibold text-[#667085]">{label}</span>

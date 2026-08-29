@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { API_URL } from "@/lib/api";
 
-const sessionMaxAge = 60 * 60 * 8;
+const sessionMaxAge = 60 * 60 * 2;
 
 export async function POST(request: NextRequest) {
   const payload = await request.json().catch(() => null);

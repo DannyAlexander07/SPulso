@@ -15,6 +15,7 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { EmailDeliveryService } from '../../email/email-delivery.service';
 import { hasGlobalCompanyAccess } from '../auth/access-scope';
 import type { AuthUser } from '../auth/jwt-auth.guard';
 import type {
@@ -59,6 +60,7 @@ type AnnouncementRecord = {
 export class AnnouncementsService {
   constructor(
     private readonly auditService: AuditService,
+    private readonly emailDelivery: EmailDeliveryService,
     private readonly prisma: PrismaService,
   ) {}
 
@@ -196,8 +198,12 @@ export class AnnouncementsService {
           emailQueue.find((item) => item.status === EmailDeliveryStatus.FAILED)
             ?._count.id ?? 0,
         pending:
-          emailQueue.find((item) => item.status === EmailDeliveryStatus.PENDING)
-            ?._count.id ?? 0,
+          (emailQueue.find(
+            (item) => item.status === EmailDeliveryStatus.PENDING,
+          )?._count.id ?? 0) +
+          (emailQueue.find(
+            (item) => item.status === EmailDeliveryStatus.PROCESSING,
+          )?._count.id ?? 0),
         sent:
           emailQueue.find((item) => item.status === EmailDeliveryStatus.SENT)
             ?._count.id ?? 0,
@@ -486,7 +492,17 @@ export class AnnouncementsService {
       );
     }
 
+    await this.prisma.announcementEmailDelivery.updateMany({
+      where: {
+        tenantId,
+        announcementId: announcement.id,
+        status: EmailDeliveryStatus.PROCESSING,
+        updatedAt: { lt: new Date(Date.now() - 15 * 60 * 1000) },
+      },
+      data: { status: EmailDeliveryStatus.PENDING },
+    });
     await this.prepareEmailDeliveries(tenantId, announcement);
+    this.emailDelivery.assertReady();
 
     const pendingDeliveries =
       await this.prisma.announcementEmailDelivery.findMany({
@@ -496,42 +512,85 @@ export class AnnouncementsService {
           status: EmailDeliveryStatus.PENDING,
         },
         take: 500,
-        select: { id: true },
+        select: { email: true, id: true, subject: true },
       });
-    const now = new Date();
-
-    await Promise.all(
-      pendingDeliveries.map((delivery) =>
-        this.prisma.announcementEmailDelivery.update({
-          where: { id: delivery.id },
+    let sent = 0;
+    let failed = 0;
+    const emailHtml = this.buildEmailTemplate(announcement);
+    for (const delivery of pendingDeliveries) {
+      const claimed = await this.prisma.announcementEmailDelivery.updateMany({
+        where: { id: delivery.id, status: EmailDeliveryStatus.PENDING },
+        data: {
+          status: EmailDeliveryStatus.PROCESSING,
+          errorMessage: null,
+        },
+      });
+      if (claimed.count !== 1) continue;
+      try {
+        await this.emailDelivery.send({
+          html: emailHtml,
+          subject: delivery.subject,
+          to: delivery.email,
+        });
+        await this.prisma.announcementEmailDelivery.updateMany({
+          where: {
+            id: delivery.id,
+            status: EmailDeliveryStatus.PROCESSING,
+          },
           data: {
             status: EmailDeliveryStatus.SENT,
-            sentAt: now,
+            sentAt: new Date(),
             errorMessage: null,
           },
-        }),
-      ),
-    );
+        });
+        sent += 1;
+      } catch (error) {
+        await this.prisma.announcementEmailDelivery.updateMany({
+          where: {
+            id: delivery.id,
+            status: EmailDeliveryStatus.PROCESSING,
+          },
+          data: {
+            status: EmailDeliveryStatus.FAILED,
+            sentAt: null,
+            errorMessage:
+              error instanceof Error
+                ? error.message.slice(0, 500)
+                : 'Fallo desconocido del proveedor SMTP.',
+          },
+        });
+        failed += 1;
+      }
+    }
+
+    const mode = this.emailDelivery.mode();
 
     await this.auditService.write({
       tenantId,
       actorType: 'user',
       actorLabel: actor.email,
-      action: 'announcement.email_simulated',
+      action:
+        mode === 'simulation'
+          ? 'announcement.email_simulated'
+          : 'announcement.email_sent',
       entityType: 'Announcement',
       entityId: announcement.id,
-      summary: `Se simulo el envio de ${pendingDeliveries.length} correos del comunicado ${announcement.title}.`,
+      summary: `${sent} correos procesados y ${failed} fallidos para el comunicado ${announcement.title}.`,
       after: this.toJson({
-        mode: 'simulation',
-        processed: pendingDeliveries.length,
+        failed,
+        mode,
+        processed: sent + failed,
+        sent,
         subject: `[Comunicado] ${announcement.title}`,
       }),
     });
 
     return {
-      mode: 'simulation',
-      processed: pendingDeliveries.length,
-      previewHtml: this.buildEmailTemplate(announcement),
+      failed,
+      mode,
+      processed: sent + failed,
+      previewHtml: emailHtml,
+      sent,
       queue: await this.emailQueueSummary(tenantId, announcement.id),
     };
   }
@@ -840,6 +899,9 @@ export class AnnouncementsService {
             ...(recipientIds.length > 0
               ? { employeeId: { notIn: recipientIds } }
               : {}),
+            status: {
+              notIn: [EmailDeliveryStatus.SENT, EmailDeliveryStatus.PROCESSING],
+            },
           },
         });
 
@@ -858,13 +920,17 @@ export class AnnouncementsService {
           where: {
             announcementId: announcement.id,
             tenantId,
-            status: { not: EmailDeliveryStatus.SENT },
+            status: {
+              notIn: [EmailDeliveryStatus.SENT, EmailDeliveryStatus.PROCESSING],
+            },
           },
         });
 
         const pendingRecipients = recipients.filter(
           (employee) =>
-            statusByEmployee.get(employee.id) !== EmailDeliveryStatus.SENT,
+            statusByEmployee.get(employee.id) !== EmailDeliveryStatus.SENT &&
+            statusByEmployee.get(employee.id) !==
+              EmailDeliveryStatus.PROCESSING,
         );
         if (pendingRecipients.length > 0) {
           await tx.announcementEmailDelivery.createMany({
@@ -907,8 +973,11 @@ export class AnnouncementsService {
         emailQueue.find((item) => item.status === EmailDeliveryStatus.FAILED)
           ?._count.id ?? 0,
       pending:
-        emailQueue.find((item) => item.status === EmailDeliveryStatus.PENDING)
-          ?._count.id ?? 0,
+        (emailQueue.find((item) => item.status === EmailDeliveryStatus.PENDING)
+          ?._count.id ?? 0) +
+        (emailQueue.find(
+          (item) => item.status === EmailDeliveryStatus.PROCESSING,
+        )?._count.id ?? 0),
       sent:
         emailQueue.find((item) => item.status === EmailDeliveryStatus.SENT)
           ?._count.id ?? 0,

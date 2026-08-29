@@ -347,6 +347,10 @@ export class AttendanceService {
       selfMarkAttendanceDto.latitude,
       selfMarkAttendanceDto.longitude,
     );
+    const privacyNoticeVersion = this.assertLocationConsent(
+      selfMarkAttendanceDto.locationConsent,
+      selfMarkAttendanceDto.privacyNoticeVersion,
+    );
     this.assertLocationWithinGeofence(location, employee.company);
     const currentRecord = await this.prisma.attendanceRecord.findUnique({
       where: {
@@ -366,14 +370,21 @@ export class AttendanceService {
         throw new BadRequestException('Tu salida ya fue registrada hoy.');
       }
 
-      return this.prisma.attendanceRecord.update({
-        where: { id: currentRecord.id },
+      const checkedOut = await this.prisma.attendanceRecord.updateMany({
+        where: { id: currentRecord.id, checkOut: null },
         data: {
           checkOut: now,
           checkOutLatitude: location?.latitude,
           checkOutLongitude: location?.longitude,
+          checkOutConsentAt: now,
+          checkOutPrivacyNoticeVersion: privacyNoticeVersion,
           source: 'worker',
         },
+      });
+      if (checkedOut.count !== 1)
+        throw new BadRequestException('Tu salida ya fue registrada hoy.');
+      return this.prisma.attendanceRecord.findUniqueOrThrow({
+        where: { id: currentRecord.id },
         select: this.attendanceRecordSelect(),
       });
     }
@@ -390,33 +401,53 @@ export class AttendanceService {
       ? AttendanceStatus.LATE
       : AttendanceStatus.PRESENT;
 
-    return this.prisma.attendanceRecord.upsert({
-      where: {
-        employeeId_workDate: {
+    if (currentRecord) {
+      const checkedIn = await this.prisma.attendanceRecord.updateMany({
+        where: { id: currentRecord.id, checkIn: null },
+        data: {
+          checkIn: now,
+          checkInLatitude: location?.latitude,
+          checkInLongitude: location?.longitude,
+          checkInConsentAt: now,
+          checkInPrivacyNoticeVersion: privacyNoticeVersion,
+          status,
+          source: 'worker',
+        },
+      });
+      if (checkedIn.count !== 1)
+        throw new BadRequestException('Tu entrada ya fue registrada hoy.');
+      return this.prisma.attendanceRecord.findUniqueOrThrow({
+        where: { id: currentRecord.id },
+        select: this.attendanceRecordSelect(),
+      });
+    }
+
+    try {
+      return await this.prisma.attendanceRecord.create({
+        data: {
+          tenantId: employee.tenantId,
+          companyId: employee.companyId,
           employeeId: employee.id,
           workDate,
+          checkIn: now,
+          checkInLatitude: location?.latitude,
+          checkInLongitude: location?.longitude,
+          checkInConsentAt: now,
+          checkInPrivacyNoticeVersion: privacyNoticeVersion,
+          status,
+          source: 'worker',
         },
-      },
-      update: {
-        checkIn: now,
-        checkInLatitude: location?.latitude,
-        checkInLongitude: location?.longitude,
-        status,
-        source: 'worker',
-      },
-      create: {
-        tenantId: employee.tenantId,
-        companyId: employee.companyId,
-        employeeId: employee.id,
-        workDate,
-        checkIn: now,
-        checkInLatitude: location?.latitude,
-        checkInLongitude: location?.longitude,
-        status,
-        source: 'worker',
-      },
-      select: this.attendanceRecordSelect(),
-    });
+        select: this.attendanceRecordSelect(),
+      });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        throw new BadRequestException('Tu entrada ya fue registrada hoy.');
+      }
+      throw error;
+    }
   }
 
   private async resolvePublicCompanyScope(
@@ -699,6 +730,21 @@ export class AttendanceService {
       latitude: parsedLatitude,
       longitude: parsedLongitude,
     };
+  }
+
+  private assertLocationConsent(consent: unknown, version: unknown) {
+    const normalizedVersion = this.toOptionalString(version);
+    if (process.env.NODE_ENV === 'production' && consent !== true) {
+      throw new BadRequestException(
+        'Debes aceptar el aviso de privacidad GPS antes de marcar asistencia.',
+      );
+    }
+    if (consent === true && normalizedVersion !== 'gps-2026-08-29') {
+      throw new BadRequestException(
+        'El aviso de privacidad GPS no esta vigente. Recarga la pantalla.',
+      );
+    }
+    return consent === true ? normalizedVersion : null;
   }
 
   private assertLocationWithinGeofence(

@@ -35,7 +35,7 @@ export function getJwtSignOptions(): SignOptions {
   return {
     algorithm: jwtAlgorithm,
     audience: process.env.JWT_AUDIENCE ?? 'spulso-web',
-    expiresIn: (process.env.JWT_EXPIRES_IN ?? '8h') as SignOptions['expiresIn'],
+    expiresIn: (process.env.JWT_EXPIRES_IN ?? '2h') as SignOptions['expiresIn'],
     issuer: process.env.JWT_ISSUER ?? 'spulso-api',
   };
 }

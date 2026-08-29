@@ -1,0 +1,20 @@
+[Unit]
+Description=SPulso verified PostgreSQL and uploads backup
+Requires=docker.service
+After=docker.service network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Environment=SPULSO_APP_DIR=/opt/spulso/app
+Environment=SPULSO_ENV_FILE=/opt/spulso/.env.production
+Environment=SPULSO_BACKUP_DIR=/var/backups/spulso
+EnvironmentFile=-/etc/spulso/backup.env
+ExecStart=/usr/local/sbin/spulso-backup
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/backups/spulso /var/lib/docker /run/docker.sock
+NoNewPrivileges=true

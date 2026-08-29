@@ -35,6 +35,7 @@ import type { AuthUser } from '../auth/jwt-auth.guard';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Permissions } from '../auth/permissions.decorator';
 import { PermissionsGuard } from '../auth/permissions.guard';
+import { MalwareScanService } from '../../security/malware-scan.service';
 
 const allowedMimeTypes = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const allowedDocumentMimeTypes = new Set([
@@ -54,7 +55,10 @@ const documentUploadTenantQuota = 20 * 1024 * 1024 * 1024;
 @Controller()
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 export class FilesController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly malwareScan: MalwareScanService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   @Get(['uploads/:category/:filename'])
   async readProtectedFile(
@@ -127,7 +131,7 @@ export class FilesController {
       },
     }),
   )
-  uploadAnnouncementImage(
+  async uploadAnnouncementImage(
     @CurrentUser() actor: AuthUser,
     @UploadedFile() file: Express.Multer.File | undefined,
   ) {
@@ -141,6 +145,8 @@ export class FilesController {
         'La imagen no coincide con un archivo JPG, PNG o WebP valido.',
       );
     }
+
+    await this.scanOrRemove(file.path);
 
     return {
       fileName: file.filename,
@@ -186,7 +192,7 @@ export class FilesController {
       },
     }),
   )
-  uploadUserImage(
+  async uploadUserImage(
     @CurrentUser() actor: AuthUser,
     @UploadedFile() file: Express.Multer.File | undefined,
   ) {
@@ -200,6 +206,8 @@ export class FilesController {
         'La imagen no coincide con un archivo JPG, PNG o WebP valido.',
       );
     }
+
+    await this.scanOrRemove(file.path);
 
     return {
       fileName: file.filename,
@@ -245,7 +253,7 @@ export class FilesController {
       },
     }),
   )
-  uploadDocumentFile(
+  async uploadDocumentFile(
     @CurrentUser() actor: AuthUser,
     @UploadedFile() file: Express.Multer.File | undefined,
   ) {
@@ -260,6 +268,8 @@ export class FilesController {
       );
     }
 
+    await this.scanOrRemove(file.path);
+
     try {
       this.assertDocumentUploadQuota(actor);
     } catch (error) {
@@ -273,6 +283,15 @@ export class FilesController {
       size: file.size,
       url: `/uploads/documentos/${file.filename}`,
     };
+  }
+
+  private async scanOrRemove(path: string) {
+    try {
+      await this.malwareScan.scanFile(path);
+    } catch (error) {
+      if (existsSync(path)) unlinkSync(path);
+      throw error;
+    }
   }
 
   private assertDocumentUploadQuota(actor: AuthUser) {

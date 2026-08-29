@@ -6,4 +6,6 @@ export type SelfMarkAttendanceDto = {
   action: 'CHECK_IN' | 'CHECK_OUT';
   latitude?: number;
   longitude?: number;
+  locationConsent?: boolean;
+  privacyNoticeVersion?: string;
 };

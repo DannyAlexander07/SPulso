@@ -29,6 +29,7 @@ import { CreateEmployeeForm } from "./create-employee-form";
 import { EmployeeRowActions } from "./employee-row-actions";
 import { EmployeeFiltersForm } from "./employee-filters";
 import { EmployeesExportButton } from "./employees-export-button";
+import { EmployeeImportDialog } from "./employee-import-dialog";
 import type { Employee, EmployeeFilters, EmployeesPagination } from "./types";
 import type { OrganizationData } from "@/features/organization/types";
 import { mediaUrl } from "@/lib/api";
@@ -101,10 +102,13 @@ export function EmployeesView({
                     total={pagination.total ?? employees.length}
                   />
                   {canManage ? (
-                    <CreateEmployeeForm
-                      companies={companies}
-                      organization={organization}
-                    />
+                    <>
+                      <EmployeeImportDialog companies={companies} />
+                      <CreateEmployeeForm
+                        companies={companies}
+                        organization={organization}
+                      />
+                    </>
                   ) : null}
                 </>
               }

@@ -121,6 +121,8 @@ function isAllowedMultipartPath(path: string) {
     '/files/users',
     '/portal/foto/archivo',
     '/portal/photo/file',
+    '/trabajadores/importaciones',
+    '/employees/imports',
   ].includes(normalizedPath);
 }
 
@@ -185,6 +187,13 @@ function getRateLimitRule(path: string): RateLimitRule {
   if (path === '/exportaciones' || path === '/export-jobs') {
     return {
       limit: positiveIntegerEnv('EXPORT_CREATE_RATE_LIMIT', 5),
+      windowMs: 60_000,
+    };
+  }
+
+  if (path === '/trabajadores/importaciones' || path === '/employees/imports') {
+    return {
+      limit: positiveIntegerEnv('EMPLOYEE_IMPORT_RATE_LIMIT', 3),
       windowMs: 60_000,
     };
   }

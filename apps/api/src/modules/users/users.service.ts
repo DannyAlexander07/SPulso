@@ -365,11 +365,7 @@ export class UsersService {
       );
     }
 
-    if (password.length < 8) {
-      throw new BadRequestException(
-        'La contraseña debe tener al menos 8 caracteres.',
-      );
-    }
+    this.assertStrongPassword(password);
 
     this.assertEmail(email);
     this.assertPersonName(firstName, 'El nombre');
@@ -776,11 +772,7 @@ export class UsersService {
       this.assertPersonName(lastName, 'El apellido');
     }
 
-    if (password && password.length < 8) {
-      throw new BadRequestException(
-        'La contraseña debe tener al menos 8 caracteres.',
-      );
-    }
+    if (password) this.assertStrongPassword(password);
 
     if (user.id === actor.sub && status && status !== UserStatus.ACTIVE) {
       throw new BadRequestException(
@@ -1811,6 +1803,21 @@ export class UsersService {
   private assertEmail(value: string) {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value) || value.length > 254) {
       throw new BadRequestException('El correo no tiene un formato valido.');
+    }
+  }
+
+  private assertStrongPassword(value: string) {
+    if (
+      value.length < 8 ||
+      value.length > 128 ||
+      !/[a-z]/.test(value) ||
+      !/[A-Z]/.test(value) ||
+      !/\d/.test(value) ||
+      !/[^A-Za-z0-9]/.test(value)
+    ) {
+      throw new BadRequestException(
+        'La contraseña debe tener entre 8 y 128 caracteres e incluir mayuscula, minuscula, numero y simbolo.',
+      );
     }
   }
 

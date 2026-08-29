@@ -1,6 +1,28 @@
 import { expect, test, type Page } from "@playwright/test";
 import { loginAsAdmin, loginAsWorker } from "./helpers";
 
+test("importador Excel mantiene modal y bandeja dentro del viewport", async ({
+  page,
+}) => {
+  await loginAsAdmin(page);
+  await page.goto("/trabajadores", { waitUntil: "domcontentloaded" });
+  await page.getByRole("button", { name: "Importar Excel" }).click();
+
+  const dialog = page.getByRole("dialog").first();
+  await expect(dialog).toBeVisible();
+  await expect(
+    page.getByText("Historial de cargas", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByLabel("Archivo Excel")).toBeVisible();
+  const box = await dialog.boundingBox();
+  const viewport = page.viewportSize();
+  expect(box).not.toBeNull();
+  expect(viewport).not.toBeNull();
+  expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(
+    viewport?.width ?? 0,
+  );
+});
+
 test("admin mantiene navegacion usable en movil", async ({ page }) => {
   await loginAsAdmin(page);
   await page.goto("/", { waitUntil: "domcontentloaded" });

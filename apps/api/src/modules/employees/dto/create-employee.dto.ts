@@ -7,6 +7,9 @@ export type CreateEmployeeDto = {
   firstName: string;
   lastName: string;
   documentNumber?: string;
+  personalEmail?: string;
+  phoneMobile?: string;
+  address?: string;
   employeeCode?: string;
   attendancePin?: string;
   jobTitle?: string;

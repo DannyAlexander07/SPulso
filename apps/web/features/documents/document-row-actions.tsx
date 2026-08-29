@@ -51,6 +51,9 @@ export function DocumentRowActions({
           firstName: employeeDocument.employee.firstName,
           lastName: employeeDocument.employee.lastName,
           documentNumber: null,
+          personalEmail: null,
+          phoneMobile: null,
+          address: null,
           employeeCode: null,
           areaId: null,
           positionId: null,
@@ -134,7 +137,9 @@ export function DocumentRowActions({
       setUploadState("success");
     } catch (error) {
       setUploadState("error");
-      setMessage(error instanceof Error ? error.message : "No se pudo subir el archivo.");
+      setMessage(
+        error instanceof Error ? error.message : "No se pudo subir el archivo.",
+      );
     }
   }
 
@@ -153,7 +158,9 @@ export function DocumentRowActions({
       closeModal();
     } catch (error) {
       setState("error");
-      setMessage(error instanceof Error ? error.message : "No se pudo eliminar.");
+      setMessage(
+        error instanceof Error ? error.message : "No se pudo eliminar.",
+      );
     }
   }
 
@@ -175,13 +182,15 @@ export function DocumentRowActions({
       await updateDocument(employeeDocument.id, {
         employeeId,
         type: String(data.get("type") ?? "OTHER") as EmployeeDocument["type"],
-        status: String(data.get("status") ?? "DRAFT") as EmployeeDocument["status"],
+        status: String(
+          data.get("status") ?? "DRAFT",
+        ) as EmployeeDocument["status"],
         title: String(data.get("title") ?? ""),
         folder: String(data.get("folder") ?? "") || null,
         fileUrl: fileUrl || null,
         fileName: fileUrl ? fileName || null : null,
-        mimeType: fileUrl ? fileMeta.mimeType ?? null : null,
-        fileSize: fileUrl ? fileMeta.size ?? null : null,
+        mimeType: fileUrl ? (fileMeta.mimeType ?? null) : null,
+        fileSize: fileUrl ? (fileMeta.size ?? null) : null,
         issuedAt: String(data.get("issuedAt") ?? "") || null,
         expiresAt: String(data.get("expiresAt") ?? "") || null,
       });
@@ -192,7 +201,9 @@ export function DocumentRowActions({
       closeModal();
     } catch (error) {
       setState("error");
-      setMessage(error instanceof Error ? error.message : "No se pudo actualizar.");
+      setMessage(
+        error instanceof Error ? error.message : "No se pudo actualizar.",
+      );
     }
   }
 
@@ -220,9 +231,13 @@ export function DocumentRowActions({
                     <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#667085]">
                       Ficha documental
                     </p>
-                    <h3 className="mt-1 whitespace-normal break-words text-xl font-semibold leading-6 text-[#1f242d]">{employeeDocument.title}</h3>
+                    <h3 className="mt-1 whitespace-normal break-words text-xl font-semibold leading-6 text-[#1f242d]">
+                      {employeeDocument.title}
+                    </h3>
                     <p className="mt-1 whitespace-normal break-words text-sm leading-5 text-[#667085]">
-                      {employeeDocument.employee.firstName} {employeeDocument.employee.lastName} · {employeeDocument.company.name}
+                      {employeeDocument.employee.firstName}{" "}
+                      {employeeDocument.employee.lastName} ·{" "}
+                      {employeeDocument.company.name}
                     </p>
                   </div>
                   <button
@@ -236,7 +251,11 @@ export function DocumentRowActions({
                   </button>
                 </div>
 
-                <form autoComplete="off" className="max-h-[calc(100dvh-156px)] overflow-y-auto px-5 py-5" onSubmit={handleSubmit}>
+                <form
+                  autoComplete="off"
+                  className="max-h-[calc(100dvh-156px)] overflow-y-auto px-5 py-5"
+                  onSubmit={handleSubmit}
+                >
                   <div className="grid gap-4 lg:grid-cols-3">
                     <EmployeePicker
                       initialEmployees={pickerEmployees}
@@ -247,7 +266,12 @@ export function DocumentRowActions({
                       selectedIds={selectedEmployeeIds}
                     />
                     <Field label="Tipo">
-                      <select className={inputClassName} defaultValue={employeeDocument.type} name="type" required>
+                      <select
+                        className={inputClassName}
+                        defaultValue={employeeDocument.type}
+                        name="type"
+                        required
+                      >
                         {documentTypes.map((type) => (
                           <option key={type.value} value={type.value}>
                             {type.label}
@@ -256,7 +280,12 @@ export function DocumentRowActions({
                       </select>
                     </Field>
                     <Field label="Estado">
-                      <select className={inputClassName} defaultValue={employeeDocument.status} name="status" required>
+                      <select
+                        className={inputClassName}
+                        defaultValue={employeeDocument.status}
+                        name="status"
+                        required
+                      >
                         {documentStatuses.map((status) => (
                           <option key={status.value} value={status.value}>
                             {status.label}
@@ -265,39 +294,78 @@ export function DocumentRowActions({
                       </select>
                     </Field>
                     <Field label="Titulo">
-                      <input autoComplete="off" className={inputClassName} defaultValue={employeeDocument.title} name="title" required />
+                      <input
+                        autoComplete="off"
+                        className={inputClassName}
+                        defaultValue={employeeDocument.title}
+                        name="title"
+                        required
+                      />
                     </Field>
                     <Field label="Carpeta">
-                      <input autoComplete="off" className={inputClassName} defaultValue={employeeDocument.folder} name="folder" required />
+                      <input
+                        autoComplete="off"
+                        className={inputClassName}
+                        defaultValue={employeeDocument.folder}
+                        name="folder"
+                        required
+                      />
                     </Field>
                     <Field label="Emision">
-                      <input autoComplete="off"
+                      <input
+                        autoComplete="off"
                         className={inputClassName}
-                        defaultValue={employeeDocument.issuedAt ? employeeDocument.issuedAt.slice(0, 10) : ""}
+                        defaultValue={
+                          employeeDocument.issuedAt
+                            ? employeeDocument.issuedAt.slice(0, 10)
+                            : ""
+                        }
                         name="issuedAt"
                         type="date"
                       />
                     </Field>
                     <Field label="Vencimiento">
-                      <input autoComplete="off"
+                      <input
+                        autoComplete="off"
                         className={inputClassName}
-                        defaultValue={employeeDocument.expiresAt ? employeeDocument.expiresAt.slice(0, 10) : ""}
+                        defaultValue={
+                          employeeDocument.expiresAt
+                            ? employeeDocument.expiresAt.slice(0, 10)
+                            : ""
+                        }
                         name="expiresAt"
                         type="date"
                       />
                     </Field>
                     <div className="rounded-2xl border border-[#e1e5eb] bg-[#fbfcfd] p-3 text-sm text-[#667085] lg:col-span-3">
-                      <input accept=".pdf,image/jpeg,image/png,image/webp" className="hidden" onChange={handleFileUpload} ref={fileInputRef} type="file" />
-                      <p className="font-semibold text-[#344054]">Archivo asociado</p>
+                      <input
+                        accept=".pdf,image/jpeg,image/png,image/webp"
+                        className="hidden"
+                        onChange={handleFileUpload}
+                        ref={fileInputRef}
+                        type="file"
+                      />
+                      <p className="font-semibold text-[#344054]">
+                        Archivo asociado
+                      </p>
                       <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                        <p>{fileName || (fileUrl ? "Archivo cargado en SPulso." : "Sin archivo adjunto.")}</p>
+                        <p>
+                          {fileName ||
+                            (fileUrl
+                              ? "Archivo cargado en SPulso."
+                              : "Sin archivo adjunto.")}
+                        </p>
                         <button
                           className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-[#d8dee8] bg-white px-4 text-sm font-semibold text-[#475467] transition hover:border-[#4f46e5] hover:text-[#4f46e5] disabled:opacity-60"
                           disabled={uploadState === "loading"}
                           onClick={() => fileInputRef.current?.click()}
                           type="button"
                         >
-                          {uploadState === "loading" ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
+                          {uploadState === "loading" ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <UploadCloud className="h-4 w-4" />
+                          )}
                           {fileUrl ? "Reemplazar archivo" : "Subir archivo"}
                         </button>
                       </div>
@@ -317,11 +385,30 @@ export function DocumentRowActions({
 
                   <div className="mt-5 border-t border-[#e1e5eb] pt-4">
                     <div className="min-h-9">
-                      {state === "loading" ? <ActionFeedback message="Guardando cambios..." tone="loading" /> : null}
-                      {uploadState === "loading" ? <ActionFeedback message="Subiendo archivo..." tone="loading" /> : null}
-                      {uploadState === "success" ? <ActionFeedback message="Archivo listo para guardar." tone="success" /> : null}
-                      {state === "success" ? <ActionFeedback message={message} tone="success" /> : null}
-                      {state === "error" ? <ActionFeedback message={message} tone="error" /> : null}
+                      {state === "loading" ? (
+                        <ActionFeedback
+                          message="Guardando cambios..."
+                          tone="loading"
+                        />
+                      ) : null}
+                      {uploadState === "loading" ? (
+                        <ActionFeedback
+                          message="Subiendo archivo..."
+                          tone="loading"
+                        />
+                      ) : null}
+                      {uploadState === "success" ? (
+                        <ActionFeedback
+                          message="Archivo listo para guardar."
+                          tone="success"
+                        />
+                      ) : null}
+                      {state === "success" ? (
+                        <ActionFeedback message={message} tone="success" />
+                      ) : null}
+                      {state === "error" ? (
+                        <ActionFeedback message={message} tone="error" />
+                      ) : null}
                     </div>
 
                     <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -332,7 +419,9 @@ export function DocumentRowActions({
                         type="button"
                       >
                         <Trash2 className="h-4 w-4" />
-                        {isConfirmingDelete ? "Confirmar eliminacion" : "Eliminar documento"}
+                        {isConfirmingDelete
+                          ? "Confirmar eliminacion"
+                          : "Eliminar documento"}
                       </button>
                       <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
                         <button
@@ -348,7 +437,11 @@ export function DocumentRowActions({
                           disabled={state === "loading"}
                           type="submit"
                         >
-                          {state === "loading" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                          {state === "loading" ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Check className="h-4 w-4" />
+                          )}
                           Guardar cambios
                         </button>
                       </div>
@@ -364,7 +457,13 @@ export function DocumentRowActions({
   );
 }
 
-function Field({ children, label }: { children: React.ReactNode; label: string }) {
+function Field({
+  children,
+  label,
+}: {
+  children: React.ReactNode;
+  label: string;
+}) {
   return (
     <label className="space-y-1.5">
       <span className="text-xs font-semibold text-[#667085]">{label}</span>

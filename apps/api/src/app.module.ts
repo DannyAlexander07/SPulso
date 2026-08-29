@@ -20,10 +20,12 @@ import { OrganizationModule } from './modules/organization/organization.module';
 import { PortalModule } from './modules/portal/portal.module';
 import { RequestsModule } from './modules/requests/requests.module';
 import { UsersModule } from './modules/users/users.module';
+import { MalwareScanModule } from './security/malware-scan.module';
 
 @Module({
   imports: [
     DatabaseModule,
+    MalwareScanModule,
     AnnouncementsModule,
     AuditModule,
     AuthModule,
