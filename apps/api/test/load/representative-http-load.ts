@@ -17,10 +17,11 @@ const durationSeconds = boundedInteger(
   600,
 );
 const allowedProduction = process.env.LOAD_ALLOW_PRODUCTION === 'true';
+const useWebBff = process.env.LOAD_WEB_BFF === 'true';
 
 if (
   !allowedProduction &&
-  !/localhost|127\.0\.0\.1|staging|preprod|host\.docker\.internal/i.test(
+  !/localhost|127\.0\.0\.1|staging|preprod|host\.docker\.internal|spulso\.altaterraresources\.com\.pe/i.test(
     baseUrl,
   )
 ) {
@@ -32,16 +33,22 @@ if (
 void main();
 
 async function main() {
-  const loginResponse = await fetch(`${baseUrl}/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password }),
-  });
+  const loginResponse = await fetch(
+    `${baseUrl}${useWebBff ? '/api/auth/login' : '/auth/login'}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    },
+  );
   if (!loginResponse.ok)
     throw new Error('No se pudo autenticar el usuario de carga.');
   const loginBody = (await loginResponse.json()) as { accessToken?: string };
-  if (!loginBody.accessToken)
+  const sessionCookie = loginResponse.headers.get('set-cookie')?.split(';')[0];
+  if (!useWebBff && !loginBody.accessToken)
     throw new Error('La autenticacion no devolvio token.');
+  if (useWebBff && !sessionCookie)
+    throw new Error('La autenticacion web no devolvio cookie de sesion.');
 
   const paths = [
     '/health',
@@ -61,11 +68,15 @@ async function main() {
     let requestIndex = worker;
     while (Date.now() < deadline) {
       const path = paths[requestIndex % paths.length];
+      const requestPath =
+        useWebBff && path !== '/health' ? `/api/spulso${path}` : path;
       requestIndex += 1;
       const started = performance.now();
       try {
-        const response = await fetch(`${baseUrl}${path}`, {
-          headers: { Authorization: `Bearer ${loginBody.accessToken}` },
+        const response = await fetch(`${baseUrl}${requestPath}`, {
+          headers: useWebBff
+            ? { Cookie: sessionCookie ?? '' }
+            : { Authorization: `Bearer ${loginBody.accessToken}` },
         });
         await response.arrayBuffer();
         results.push({
@@ -96,6 +107,7 @@ async function main() {
     durationSeconds,
     virtualUsers,
     thinkTimeMs,
+    transport: useWebBff ? 'web-bff' : 'api',
     requestsPerSecond: results.length / durationSeconds,
     p50Ms: percentile(durations, 0.5),
     p95Ms: percentile(durations, 0.95),
