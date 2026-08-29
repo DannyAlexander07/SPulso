@@ -44,8 +44,9 @@ install -m 0644 "${APP_DIR}/ops/systemd/spulso-backup.service" /etc/systemd/syst
 install -m 0644 "${APP_DIR}/ops/systemd/spulso-backup.timer" /etc/systemd/system/spulso-backup.timer
 install -m 0644 "${APP_DIR}/ops/systemd/spulso-health-check.service" /etc/systemd/system/spulso-health-check.service
 install -m 0644 "${APP_DIR}/ops/systemd/spulso-health-check.timer" /etc/systemd/system/spulso-health-check.timer
-install -m 0644 "${APP_DIR}/ops/nginx/spulso-staging.conf" /etc/nginx/sites-available/spulso-staging
-ln -sfn /etc/nginx/sites-available/spulso-staging /etc/nginx/sites-enabled/spulso-staging
+install -m 0644 "${APP_DIR}/ops/nginx/spulso-staging.conf" /etc/nginx/sites-available/spulso
+ln -sfn /etc/nginx/sites-available/spulso /etc/nginx/sites-enabled/spulso
+rm -f /etc/nginx/sites-enabled/spulso-staging /etc/nginx/sites-available/spulso-staging
 
 systemctl daemon-reload
 systemctl enable --now spulso-backup.timer spulso-health-check.timer
@@ -59,4 +60,5 @@ for _ in $(seq 1 60); do
   sleep 2
 done
 curl --fail --silent --show-error --max-time 10 http://127.0.0.1:3101/health
-printf '\nSPulso staging deployed at %s\n' "$(git -C "${APP_DIR}" rev-parse --short HEAD)"
+printf '\nSPulso staging deployed at %s\n' \
+  "$(runuser -u spulso -- git -C "${APP_DIR}" rev-parse --short HEAD)"
