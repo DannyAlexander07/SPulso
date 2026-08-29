@@ -7,7 +7,7 @@ After=docker.service network-online.target
 Type=oneshot
 User=root
 Environment=SPULSO_APP_DIR=/opt/spulso/app
-Environment=SPULSO_ENV_FILE=/opt/spulso/.env.production
+Environment=SPULSO_ENV_FILE=/opt/spulso/app/.env.production
 Environment=SPULSO_BACKUP_DIR=/var/backups/spulso
 EnvironmentFile=-/etc/spulso/backup.env
 ExecStart=/usr/local/sbin/spulso-backup

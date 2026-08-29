@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 APP_DIR="${SPULSO_APP_DIR:-/opt/spulso/app}"
-ENV_FILE="${SPULSO_ENV_FILE:-/opt/spulso/.env.production}"
+ENV_FILE="${SPULSO_ENV_FILE:-/opt/spulso/app/.env.production}"
 BACKUP_DIR="${SPULSO_BACKUP_DIR:-/var/backups/spulso}"
 RETENTION_DAYS="${SPULSO_BACKUP_RETENTION_DAYS:-14}"
 COMPOSE_FILE="${APP_DIR}/docker-compose.production.yml"
