@@ -1,11 +1,15 @@
 import { expect, test } from "@playwright/test";
 import { loginAsAdmin, loginAsWorker } from "./helpers";
 
-test("admin puede descargar una exportacion de trabajadores", async ({ page }) => {
+test("admin puede descargar una exportacion de trabajadores", async ({
+  page,
+}) => {
   await loginAsAdmin(page);
   await page.goto("/trabajadores", { waitUntil: "domcontentloaded" });
 
-  await expect(page.getByRole("heading", { name: /Directorio de personas/i })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: /Directorio de personas/i }),
+  ).toBeVisible();
 
   const downloadPromise = page.waitForEvent("download");
   await page.getByRole("button", { name: /Exportar Excel/i }).click();
@@ -14,27 +18,40 @@ test("admin puede descargar una exportacion de trabajadores", async ({ page }) =
   expect(download.suggestedFilename()).toMatch(/spulso-trabajadores.*\.csv$/);
 });
 
-test("portal trabajador muestra accesos y permite abrir marcacion", async ({ page }) => {
+test("portal trabajador muestra accesos y permite abrir marcacion", async ({
+  page,
+}) => {
   await loginAsWorker(page);
   await page.goto("/portal", { waitUntil: "domcontentloaded" });
 
-  await expect(page.getByRole("heading", { name: /Maria Fernanda/i })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: /Maria Fernanda/i }),
+  ).toBeVisible();
   await page.getByRole("link", { name: /Marcar asistencia/i }).click();
 
   await expect(page).toHaveURL(/\/portal\/marcacion|\/marcacion/);
-  await expect(page.locator("body")).toContainText(/GPS|ubicacion|ubicación|jornada|asistencia/i);
+  await expect(page.locator("body")).toContainText(
+    /GPS|ubicacion|ubicación|jornada|asistencia/i,
+  );
 });
 
-test("formulario de login muestra error con credenciales invalidas", async ({ page }) => {
+test("formulario de login muestra error con credenciales invalidas", async ({
+  page,
+}) => {
   await page.goto("/login", { waitUntil: "domcontentloaded" });
+  await expect(page.locator("form")).toHaveAttribute("method", "post");
   await page.getByLabel("Correo").fill("admin@spulso.local");
   await page.getByLabel("Contraseña").fill("clave-incorrecta");
   await page.getByRole("button", { name: "Ingresar" }).click();
 
-  await expect(page.locator("form")).toContainText(/credenciales|sesion|sesión|contraseña|password/i);
+  await expect(page.locator("form")).toContainText(
+    /credenciales|sesion|sesión|contraseña|password/i,
+  );
 });
 
-test("documentos publicados usan la ruta web y conservan la fecha de calendario", async ({ page }) => {
+test("documentos publicados usan la ruta web y conservan la fecha de calendario", async ({
+  page,
+}) => {
   await loginAsAdmin(page);
 
   const employeesResponse = await page.request.get(
@@ -96,13 +113,18 @@ test("documentos publicados usan la ruta web y conservan la fecha de calendario"
     await expect(card).toContainText(/vence 31 dic\. 2099/i);
 
     const downloadLink = card.getByRole("link", { name: /Abrir/i });
-    await expect(downloadLink).toHaveAttribute("href", `/api/spulso${uploaded.url}`);
+    await expect(downloadLink).toHaveAttribute(
+      "href",
+      `/api/spulso${uploaded.url}`,
+    );
   } finally {
     await page.request.delete(`/api/spulso/documentos/${created.id}`);
   }
 });
 
-test("organizacion aprovecha el ancho disponible sin desplazarse a la derecha", async ({ page }) => {
+test("organizacion aprovecha el ancho disponible sin desplazarse a la derecha", async ({
+  page,
+}) => {
   await page.setViewportSize({ width: 1920, height: 1080 });
   await loginAsAdmin(page);
   await page.goto("/organizacion", { waitUntil: "domcontentloaded" });

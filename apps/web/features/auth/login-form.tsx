@@ -31,17 +31,25 @@ export function LoginForm() {
       router.refresh();
     } catch (error) {
       setState("error");
-      setMessage(error instanceof Error ? error.message : "No se pudo iniciar sesión.");
+      setMessage(
+        error instanceof Error ? error.message : "No se pudo iniciar sesión.",
+      );
     }
   }
 
   return (
-    <form autoComplete="off" className="mt-6 space-y-3.5" onSubmit={handleSubmit}>
+    <form
+      autoComplete="off"
+      className="mt-6 space-y-3.5"
+      method="post"
+      onSubmit={handleSubmit}
+    >
       <label className="block space-y-1.5">
         <span className="text-xs font-semibold text-[#667085]">Correo</span>
         <div className="relative">
           <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#98a2b3]" />
-          <input autoComplete="off"
+          <input
+            autoComplete="off"
             className={inputClassName}
             name="email"
             placeholder="correo@empresa.com"
@@ -54,7 +62,8 @@ export function LoginForm() {
         <span className="text-xs font-semibold text-[#667085]">Contraseña</span>
         <div className="relative">
           <KeyRound className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#98a2b3]" />
-          <input autoComplete="off"
+          <input
+            autoComplete="off"
             className={inputClassName}
             name="password"
             placeholder="Contraseña"
@@ -63,7 +72,9 @@ export function LoginForm() {
           />
         </div>
       </label>
-      <p className="min-h-5 text-sm text-[#b42318]">{state === "error" ? message : ""}</p>
+      <p className="min-h-5 text-sm text-[#b42318]">
+        {state === "error" ? message : ""}
+      </p>
       <button
         className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#4f46e5] px-4 text-sm font-semibold text-white shadow-[0_16px_30px_rgba(79,70,229,0.24)] transition hover:-translate-y-0.5 hover:bg-[#4338ca] disabled:cursor-not-allowed disabled:opacity-70"
         disabled={state === "loading"}
@@ -81,7 +92,9 @@ export function LoginForm() {
           <ShieldCheck className="h-4 w-4" />
         </span>
         <div>
-          <p className="font-semibold text-[#344054]">Software monitoreado y seguro</p>
+          <p className="font-semibold text-[#344054]">
+            Software monitoreado y seguro
+          </p>
           <p>Acceso protegido con permisos, auditoria y control por rol.</p>
         </div>
       </div>
