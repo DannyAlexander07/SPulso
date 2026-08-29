@@ -21,7 +21,7 @@ test.describe("UAT en staging", () => {
     await expect(
       page.getByRole("heading", { name: /Directorio de personas/i }),
     ).toBeVisible();
-    await page.getByRole("button", { name: /Cargar Excel/i }).click();
+    await page.getByRole("button", { name: "Importar Excel" }).click();
     await expect(
       page.getByRole("heading", { name: /Importar trabajadores/i }),
     ).toBeVisible();

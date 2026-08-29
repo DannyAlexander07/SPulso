@@ -4,6 +4,9 @@ const browserChannel = process.env.PLAYWRIGHT_CHANNEL?.trim();
 const baseURL =
   process.env.PLAYWRIGHT_BASE_URL?.trim() || "http://localhost:3000";
 const webPort = new URL(baseURL).port || "3000";
+const useExternalServer = !/^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/i.test(
+  baseURL,
+);
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -45,18 +48,20 @@ export default defineConfig({
       },
     },
   ],
-  webServer: [
-    {
-      command: "npm --prefix ../api run start:dev",
-      reuseExistingServer: true,
-      timeout: 90_000,
-      url: "http://localhost:3001/health",
-    },
-    {
-      command: `npm run dev -- --port ${webPort}`,
-      reuseExistingServer: true,
-      timeout: 90_000,
-      url: baseURL,
-    },
-  ],
+  webServer: useExternalServer
+    ? undefined
+    : [
+        {
+          command: "npm --prefix ../api run start:dev",
+          reuseExistingServer: true,
+          timeout: 90_000,
+          url: "http://localhost:3001/health",
+        },
+        {
+          command: `npm run dev -- --port ${webPort}`,
+          reuseExistingServer: true,
+          timeout: 90_000,
+          url: baseURL,
+        },
+      ],
 });
