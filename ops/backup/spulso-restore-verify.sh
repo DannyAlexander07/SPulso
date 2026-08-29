@@ -6,7 +6,7 @@ CONTAINER="spulso-restore-check-$$"
 PASSWORD="$(openssl rand -hex 24)"
 
 test -f "${BACKUP_FILE}"
-pg_restore --list "${BACKUP_FILE}" >/dev/null
+docker run --rm -i postgres:16 pg_restore --list < "${BACKUP_FILE}" >/dev/null
 
 cleanup() {
   docker rm -f "${CONTAINER}" >/dev/null 2>&1 || true

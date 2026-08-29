@@ -24,7 +24,8 @@ compose=(docker compose --project-directory "${APP_DIR}" --env-file "${ENV_FILE}
   'cd /app/apps/api/uploads && exec tar -czf - .' \
   > "${TARGET_DIR}/uploads.tar.gz"
 
-pg_restore --list "${TARGET_DIR}/postgres.dump" >/dev/null
+docker run --rm -i postgres:16 pg_restore --list \
+  < "${TARGET_DIR}/postgres.dump" >/dev/null
 tar -tzf "${TARGET_DIR}/uploads.tar.gz" >/dev/null
 sha256sum "${TARGET_DIR}/postgres.dump" "${TARGET_DIR}/uploads.tar.gz" \
   > "${TARGET_DIR}/SHA256SUMS"
