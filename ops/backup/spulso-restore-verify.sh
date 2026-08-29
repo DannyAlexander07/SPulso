@@ -28,4 +28,4 @@ docker exec -i "${CONTAINER}" pg_restore \
   -U postgres -d spulso_restore --no-owner --no-acl < "${BACKUP_FILE}"
 docker exec "${CONTAINER}" psql -U postgres -d spulso_restore \
   -v ON_ERROR_STOP=1 -Atc \
-  'SELECT CASE WHEN COUNT(*) > 0 THEN ''restore-ok'' ELSE ''restore-empty'' END FROM "_prisma_migrations";'
+  "SELECT CASE WHEN COUNT(*) > 0 THEN 'restore-ok' ELSE 'restore-empty' END FROM \"_prisma_migrations\";"
